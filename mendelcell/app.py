@@ -1,4 +1,3 @@
-import io
 import tempfile
 from pathlib import Path
 
@@ -10,10 +9,6 @@ from mendelcell import list_tissues, run_mendelcell
 from mendelcell.report import create_pdf_report, safe_filename
 
 
-# -----------------------------
-# Page setup
-# -----------------------------
-
 st.set_page_config(
     page_title="MendelCell",
     page_icon="🧬",
@@ -24,72 +19,39 @@ st.title("🧬 MendelCell")
 st.subheader("Candidate gene prioritization by tissue-specific single-cell expression")
 
 st.write(
-    "Upload Human Protein Atlas single-cell expression files and a candidate gene list. "
-    "MendelCell will identify tissue-specific cell types, find candidate genes expressed "
-    "above your threshold, and generate tables, plots, and a PDF report."
+    "MendelCell uses a built-in preprocessed Human Protein Atlas reference. "
+    "Upload a candidate gene list, choose a tissue and expression threshold, "
+    "then generate tables, plots, and a PDF report."
 )
 
 
-# -----------------------------
-# Helper functions
-# -----------------------------
+@st.cache_data
+def load_reference_data():
+    cluster_path = Path("data/mendelcell_clusters_reference.parquet")
+    hpa_path = Path("data/mendelcell_celltype_reference.parquet")
+
+    if not cluster_path.exists():
+        raise FileNotFoundError(f"Missing reference file: {cluster_path}")
+
+    if not hpa_path.exists():
+        raise FileNotFoundError(f"Missing reference file: {hpa_path}")
+
+    clusters = pd.read_parquet(cluster_path)
+    hpa = pd.read_parquet(hpa_path)
+
+    return clusters, hpa
+
 
 @st.cache_data
-def read_uploaded_tsv(file_name, file_bytes):
-    """
-    Read uploaded TSV, TXT, ZIP, or GZ file.
-    """
-    import tempfile
-    import zipfile
-    import gzip
-    from pathlib import Path
+def read_gene_list(file_name, file_bytes):
+    import io
 
-    suffix = Path(file_name).suffix.lower()
+    buffer = io.BytesIO(file_bytes)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(file_bytes)
-        tmp_path = Path(tmp.name)
+    if file_name.lower().endswith(".csv"):
+        return pd.read_csv(buffer)
 
-    try:
-        file_name_lower = file_name.lower()
-
-        if file_name_lower.endswith(".zip"):
-            with zipfile.ZipFile(tmp_path) as z:
-                file_list = [
-                    f for f in z.namelist()
-                    if not f.startswith("__MACOSX")
-                    and not f.endswith("/")
-                    and not Path(f).name.startswith(".")
-                ]
-
-                if len(file_list) == 0:
-                    raise ValueError("ZIP file is empty.")
-
-                # Use the first TSV/TXT file inside the ZIP
-                tsv_files = [
-                    f for f in file_list
-                    if f.lower().endswith((".tsv", ".txt"))
-                ]
-
-                if len(tsv_files) == 0:
-                    raise ValueError(
-                        f"No TSV/TXT file found inside ZIP. Files found: {file_list}"
-                    )
-
-                with z.open(tsv_files[0]) as f:
-                    return pd.read_csv(f, sep="\t", low_memory=False)
-
-        if file_name_lower.endswith(".gz"):
-            with gzip.open(tmp_path, "rt") as f:
-                return pd.read_csv(f, sep="\t", low_memory=False)
-
-        return pd.read_csv(tmp_path, sep="\t", low_memory=False)
-
-    except Exception as e:
-        raise ValueError(f"Could not read {file_name}: {e}")
-
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    return pd.read_csv(buffer, sep="\t")
 
 
 def make_gene_count_plot(results):
@@ -133,78 +95,23 @@ def make_ncpm_plot(results, cell_type):
     return fig
 
 
-# -----------------------------
-# Sidebar upload widgets
-# -----------------------------
-
-st.sidebar.header("1. Upload input files")
-
-cluster_file = st.sidebar.file_uploader(
-    "Upload rna_single_cell_cluster.tsv or .zip",
-    type=["tsv", "txt", "zip"]
-)
-
-hpa_file = st.sidebar.file_uploader(
-    "Upload rna_single_cell_type.tsv or .zip",
-    type=["tsv", "txt", "zip"]
-)
-
-gene_file = st.sidebar.file_uploader(
-    "Upload candidate gene list TSV",
-    type=["tsv", "txt"]
-)
-
-if cluster_file is None or hpa_file is None or gene_file is None:
-    st.info("Upload all three files to begin.")
-
-    st.markdown(
-        """
-        Required files:
-
-        1. `rna_single_cell_cluster.tsv` or `.zip`
-        2. `rna_single_cell_type.tsv` or `.zip`
-        3. Candidate gene list TSV with a column named `Gene Symbol`
-        """
-    )
-
-    st.stop()
-
-
-# -----------------------------
-# Read uploaded files
-# -----------------------------
-
 try:
-    st.write("Reading cluster file:", cluster_file.name)
-    clusters = read_uploaded_tsv(cluster_file.name, cluster_file.getvalue())
-    st.success(f"Cluster file loaded: {clusters.shape[0]} rows, {clusters.shape[1]} columns")
-
-    st.write("Reading HPA cell-type file:", hpa_file.name)
-    hpa = read_uploaded_tsv(hpa_file.name, hpa_file.getvalue())
-    st.success(f"HPA file loaded: {hpa.shape[0]} rows, {hpa.shape[1]} columns")
-
-    st.write("Reading gene list file:", gene_file.name)
-    gene_table = read_uploaded_tsv(gene_file.name, gene_file.getvalue())
-    st.success(f"Gene list loaded: {gene_table.shape[0]} rows, {gene_table.shape[1]} columns")
+    clusters, hpa = load_reference_data()
 
 except Exception as e:
-    st.error(f"Could not read uploaded files: {e}")
+    st.error("Could not load MendelCell reference files.")
     st.exception(e)
     st.stop()
 
 
+valid_tissues = list_tissues(clusters)
 
+st.sidebar.header("1. Upload gene list")
 
-# -----------------------------
-# Sidebar analysis settings
-# -----------------------------
-
-try:
-    valid_tissues = list_tissues(clusters)
-
-except Exception as e:
-    st.error(f"Could not find tissue names in cluster file: {e}")
-    st.stop()
+gene_file = st.sidebar.file_uploader(
+    "Upload candidate gene list TSV or CSV",
+    type=["tsv", "txt", "csv"]
+)
 
 st.sidebar.header("2. Choose settings")
 
@@ -223,13 +130,53 @@ threshold = st.sidebar.number_input(
 run_button = st.sidebar.button("Run MendelCell analysis")
 
 
-# -----------------------------
-# Run analysis
-# -----------------------------
+if gene_file is None:
+    st.info("Upload a candidate gene list to begin.")
+
+    st.markdown(
+        """
+        Your gene list should contain a column named:
+
+        ```text
+        Gene Symbol
+        ```
+
+        Example:
+
+        ```text
+        Gene Symbol
+        INS
+        GCG
+        PDX1
+        CD3D
+        PTPRC
+        ```
+        """
+    )
+
+    st.stop()
+
+
+try:
+    gene_table = read_gene_list(gene_file.name, gene_file.getvalue())
+
+except Exception as e:
+    st.error(f"Could not read gene list file: {e}")
+    st.exception(e)
+    st.stop()
+
+
+if "Gene Symbol" not in gene_table.columns:
+    st.error("Gene list must contain a column named 'Gene Symbol'.")
+    st.write("Columns found:")
+    st.write(list(gene_table.columns))
+    st.stop()
+
 
 if not run_button:
     st.info("Choose a tissue and threshold, then click **Run MendelCell analysis**.")
     st.stop()
+
 
 try:
     results = run_mendelcell(
@@ -242,12 +189,9 @@ try:
 
 except Exception as e:
     st.error(f"MendelCell analysis failed: {e}")
+    st.exception(e)
     st.stop()
 
-
-# -----------------------------
-# Display results
-# -----------------------------
 
 st.success("Analysis complete.")
 
@@ -288,10 +232,6 @@ for cell_type in results.ncpm_df["Cell type"].unique():
     st.pyplot(fig)
     plt.close(fig)
 
-
-# -----------------------------
-# Create downloadable outputs
-# -----------------------------
 
 st.header("Download outputs")
 

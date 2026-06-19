@@ -37,15 +37,51 @@ st.write(
 @st.cache_data
 def read_uploaded_tsv(file_name, file_bytes):
     """
-    Read uploaded TSV or zipped TSV file.
-    Streamlit uploaded files are read as bytes so caching works cleanly.
+    Read uploaded TSV, TXT, ZIP, or GZ file.
+    Works with Streamlit uploaded files.
     """
+    import zipfile
+    import gzip
+
+    file_name_lower = file_name.lower()
     buffer = io.BytesIO(file_bytes)
 
-    if file_name.lower().endswith(".zip"):
-        return pd.read_csv(buffer, sep="\t", compression="zip")
+    try:
+        # Case 1: ZIP file, such as rna_single_cell_cluster.tsv.zip
+        if file_name_lower.endswith(".zip"):
+            with zipfile.ZipFile(buffer) as z:
+                file_list = z.namelist()
 
-    return pd.read_csv(buffer, sep="\t")
+                # Ignore hidden Mac files inside ZIP
+                file_list = [
+                    f for f in file_list
+                    if not f.startswith("__MACOSX")
+                    and not f.endswith("/")
+                    and not Path(f).name.startswith(".")
+                ]
+
+                if len(file_list) == 0:
+                    raise ValueError("ZIP file is empty.")
+
+                if len(file_list) > 1:
+                    raise ValueError(
+                        f"ZIP file contains multiple files: {file_list}. "
+                        "Please upload a ZIP containing only one TSV file."
+                    )
+
+                with z.open(file_list[0]) as f:
+                    return pd.read_csv(f, sep="\t")
+
+        # Case 2: GZIP file
+        if file_name_lower.endswith(".gz"):
+            with gzip.open(buffer, "rt") as f:
+                return pd.read_csv(f, sep="\t")
+
+        # Case 3: normal TSV or TXT file
+        return pd.read_csv(buffer, sep="\t")
+
+    except Exception as e:
+        raise ValueError(f"Could not read {file_name}: {e}")
 
 
 def make_gene_count_plot(results):

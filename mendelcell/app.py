@@ -9,6 +9,21 @@ from mendelcell import list_tissues, run_mendelcell
 from mendelcell.report import create_pdf_report, safe_filename
 
 
+# -----------------------------
+# Paths
+# -----------------------------
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT_DIR / "data"
+
+CLUSTER_REFERENCE = DATA_DIR / "mendelcell_clusters_reference.parquet"
+CELLTYPE_REFERENCE = DATA_DIR / "mendelcell_celltype_reference.parquet"
+
+
+# -----------------------------
+# Page setup
+# -----------------------------
+
 st.set_page_config(
     page_title="MendelCell",
     page_icon="🧬",
@@ -19,40 +34,70 @@ st.title("🧬 MendelCell")
 st.subheader("Candidate gene prioritization by tissue-specific single-cell expression")
 
 st.write(
-    "MendelCell uses a built-in preprocessed Human Protein Atlas reference. "
-    "Upload a candidate gene list, choose a tissue and expression threshold, "
-    "then generate tables, plots, and a PDF report."
+    "MendelCell uses a preprocessed Human Protein Atlas reference. "
+    "Upload a candidate gene list, enter a tissue, choose an expression threshold, "
+    "and generate tables, plots, and a PDF report."
 )
 
 
-@st.cache_data
+# -----------------------------
+# Load reference files
+# -----------------------------
+
+@st.cache_data(show_spinner=False)
 def load_reference_data():
-    cluster_path = Path("data/mendelcell_clusters_reference.parquet")
-    hpa_path = Path("data/mendelcell_celltype_reference.parquet")
+    """
+    Load preprocessed HPA reference files.
 
-    if not cluster_path.exists():
-        raise FileNotFoundError(f"Missing reference file: {cluster_path}")
+    This function is cached, but it is only called after the user clicks Run.
+    That avoids crashing the app immediately at startup.
+    """
+    if not CLUSTER_REFERENCE.exists():
+        raise FileNotFoundError(
+            f"Missing cluster reference file: {CLUSTER_REFERENCE}"
+        )
 
-    if not hpa_path.exists():
-        raise FileNotFoundError(f"Missing reference file: {hpa_path}")
+    if not CELLTYPE_REFERENCE.exists():
+        raise FileNotFoundError(
+            f"Missing cell-type reference file: {CELLTYPE_REFERENCE}"
+        )
 
-    clusters = pd.read_parquet(cluster_path)
-    hpa = pd.read_parquet(hpa_path)
+    clusters = pd.read_parquet(CLUSTER_REFERENCE)
+    hpa = pd.read_parquet(CELLTYPE_REFERENCE)
 
     return clusters, hpa
 
 
-@st.cache_data
+# -----------------------------
+# Read uploaded gene list
+# -----------------------------
+
 def read_gene_list(file_name, file_bytes):
+    """
+    Read uploaded gene list.
+
+    Supports:
+    - TSV
+    - TXT
+    - CSV
+
+    Required column:
+    - Gene Symbol
+    """
     import io
 
     buffer = io.BytesIO(file_bytes)
+    file_name_lower = file_name.lower()
 
-    if file_name.lower().endswith(".csv"):
+    if file_name_lower.endswith(".csv"):
         return pd.read_csv(buffer)
 
     return pd.read_csv(buffer, sep="\t")
 
+
+# -----------------------------
+# Plot helpers
+# -----------------------------
 
 def make_gene_count_plot(results):
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -95,16 +140,9 @@ def make_ncpm_plot(results, cell_type):
     return fig
 
 
-try:
-    clusters, hpa = load_reference_data()
-
-except Exception as e:
-    st.error("Could not load MendelCell reference files.")
-    st.exception(e)
-    st.stop()
-
-
-valid_tissues = list_tissues(clusters)
+# -----------------------------
+# Sidebar
+# -----------------------------
 
 st.sidebar.header("1. Upload gene list")
 
@@ -115,9 +153,9 @@ gene_file = st.sidebar.file_uploader(
 
 st.sidebar.header("2. Choose settings")
 
-selected_tissue = st.sidebar.selectbox(
-    "Select tissue",
-    valid_tissues
+selected_tissue = st.sidebar.text_input(
+    "Enter tissue name",
+    value="Pancreas"
 )
 
 threshold = st.sidebar.number_input(
@@ -129,6 +167,10 @@ threshold = st.sidebar.number_input(
 
 run_button = st.sidebar.button("Run MendelCell analysis")
 
+
+# -----------------------------
+# Startup info
+# -----------------------------
 
 if gene_file is None:
     st.info("Upload a candidate gene list to begin.")
@@ -154,8 +196,23 @@ if gene_file is None:
         """
     )
 
+    st.markdown(
+        """
+        The HPA reference files should already be included in the app at:
+
+        ```text
+        data/mendelcell_clusters_reference.parquet
+        data/mendelcell_celltype_reference.parquet
+        ```
+        """
+    )
+
     st.stop()
 
+
+# -----------------------------
+# Read gene list
+# -----------------------------
 
 try:
     gene_table = read_gene_list(gene_file.name, gene_file.getvalue())
@@ -173,25 +230,75 @@ if "Gene Symbol" not in gene_table.columns:
     st.stop()
 
 
+st.success(
+    f"Gene list uploaded: {gene_table.shape[0]:,} rows and {gene_table.shape[1]:,} columns"
+)
+
+with st.expander("Preview uploaded gene list"):
+    st.dataframe(gene_table.head(20), use_container_width=True)
+
+
 if not run_button:
-    st.info("Choose a tissue and threshold, then click **Run MendelCell analysis**.")
+    st.info("Enter a tissue and threshold, then click **Run MendelCell analysis**.")
     st.stop()
 
 
+# -----------------------------
+# Load reference files only after Run
+# -----------------------------
+
 try:
-    results = run_mendelcell(
-        clusters=clusters,
-        hpa=hpa,
-        gene_table=gene_table,
-        tissue=selected_tissue,
-        threshold=threshold
+    with st.spinner("Loading MendelCell reference files..."):
+        clusters, hpa = load_reference_data()
+
+    st.success(
+        f"Reference loaded: {clusters.shape[0]:,} cluster rows and "
+        f"{hpa.shape[0]:,} cell-type rows"
     )
+
+except Exception as e:
+    st.error("Could not load MendelCell reference files.")
+    st.exception(e)
+    st.stop()
+
+
+# -----------------------------
+# Optional: show available tissues
+# -----------------------------
+
+try:
+    available_tissues = list_tissues(clusters)
+
+    with st.expander("Available tissues in reference"):
+        st.write(available_tissues)
+
+except Exception as e:
+    st.warning(f"Could not list available tissues: {e}")
+
+
+# -----------------------------
+# Run MendelCell analysis
+# -----------------------------
+
+try:
+    with st.spinner("Running MendelCell analysis..."):
+        results = run_mendelcell(
+            clusters=clusters,
+            hpa=hpa,
+            gene_table=gene_table,
+            tissue=selected_tissue,
+            threshold=threshold
+        )
 
 except Exception as e:
     st.error(f"MendelCell analysis failed: {e}")
     st.exception(e)
     st.stop()
 
+
+# -----------------------------
+# Display results
+# -----------------------------
 
 st.success("Analysis complete.")
 
@@ -205,8 +312,10 @@ col4.metric(
     len(results.filtered[["Cell type", "Gene name"]].drop_duplicates())
 )
 
+
 st.header("Cell types unique to selected tissue")
 st.dataframe(results.unique_to_tissue, use_container_width=True)
+
 
 st.header("Candidate gene count per cell type")
 st.dataframe(results.cell_count_df, use_container_width=True)
@@ -216,22 +325,33 @@ if not results.plot_df.empty:
     st.pyplot(fig)
     plt.close(fig)
 
+
 st.header("Candidate genes found in each cell type")
 st.dataframe(results.genes_in_cell_df, use_container_width=True)
+
 
 st.header("Filtered candidate genes")
 st.dataframe(results.filtered_report, use_container_width=True)
 
+
 st.header("Mean nCPM values")
 st.dataframe(results.ncpm_df, use_container_width=True)
 
+
 st.header("nCPM plots by cell type")
 
-for cell_type in results.ncpm_df["Cell type"].unique():
-    fig = make_ncpm_plot(results, cell_type)
-    st.pyplot(fig)
-    plt.close(fig)
+if results.ncpm_df.empty:
+    st.info("No nCPM values available for plotting.")
+else:
+    for cell_type in results.ncpm_df["Cell type"].unique():
+        fig = make_ncpm_plot(results, cell_type)
+        st.pyplot(fig)
+        plt.close(fig)
 
+
+# -----------------------------
+# Download outputs
+# -----------------------------
 
 st.header("Download outputs")
 
@@ -242,19 +362,25 @@ ncpm_tsv = results.ncpm_df.to_csv(sep="\t", index=False)
 safe_tissue = safe_filename(results.selected_tissue)
 pdf_filename = f"MendelCell_report_{safe_tissue}.pdf"
 
-with tempfile.TemporaryDirectory() as tmpdir:
-    pdf_path = Path(tmpdir) / pdf_filename
-    create_pdf_report(results, pdf_path)
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_path = Path(tmpdir) / pdf_filename
+        create_pdf_report(results, pdf_path)
 
-    with open(pdf_path, "rb") as f:
-        pdf_bytes = f.read()
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
 
-st.download_button(
-    label="Download PDF report",
-    data=pdf_bytes,
-    file_name=pdf_filename,
-    mime="application/pdf"
-)
+    st.download_button(
+        label="Download PDF report",
+        data=pdf_bytes,
+        file_name=pdf_filename,
+        mime="application/pdf"
+    )
+
+except Exception as e:
+    st.error("Could not create PDF report.")
+    st.exception(e)
+
 
 st.download_button(
     label="Download unique cell types TSV",

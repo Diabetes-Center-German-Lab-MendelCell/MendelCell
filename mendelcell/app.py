@@ -132,6 +132,75 @@ def make_ncpm_plot(results, cell_type):
     return fig
 
 
+def make_top_ncpm_plot(results, top_n=10):
+    """
+    Plot the top gene-cell type combinations by average nCPM.
+
+    X-axis:
+    - Gene name + cell type combination
+
+    Y-axis:
+    - Average nCPM
+
+    Bars are sorted so the highest value starts from the left.
+    """
+    if results.ncpm_df.empty:
+        return None, pd.DataFrame()
+
+    required_cols = ["Gene name", "Cell type", "nCPM"]
+
+    missing_cols = [
+        col for col in required_cols
+        if col not in results.ncpm_df.columns
+    ]
+
+    if missing_cols:
+        raise ValueError(f"nCPM table is missing columns: {missing_cols}")
+
+    plot_df = results.ncpm_df[required_cols].copy()
+
+    plot_df["nCPM"] = pd.to_numeric(plot_df["nCPM"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["Gene name", "Cell type", "nCPM"])
+
+    if plot_df.empty:
+        return None, pd.DataFrame()
+
+    top_df = (
+        plot_df.groupby(["Gene name", "Cell type"], as_index=False)["nCPM"]
+        .mean()
+        .rename(columns={"nCPM": "Average nCPM"})
+        .sort_values("Average nCPM", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+    if top_df.empty:
+        return None, top_df
+
+    top_df["Gene + cell type"] = (
+        top_df["Gene name"].astype(str)
+        + " | "
+        + top_df["Cell type"].astype(str)
+    )
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+
+    ax.bar(top_df["Gene + cell type"], top_df["Average nCPM"])
+
+    ax.set_xlabel("Gene and cell type")
+    ax.set_ylabel("Average nCPM")
+    ax.set_title(f"Top {top_n} gene-cell type combinations by average nCPM")
+
+    ax.tick_params(axis="x", rotation=45)
+
+    for label in ax.get_xticklabels():
+        label.set_ha("right")
+
+    fig.tight_layout()
+
+    return fig, top_df
+
+
 # -----------------------------
 # Sidebar
 # -----------------------------
@@ -147,7 +216,7 @@ st.sidebar.header("2. Choose settings")
 
 selected_tissue = st.sidebar.text_input(
     "Enter tissue name",
-    value="Pancreas"
+    value="Immune cells"
 )
 
 threshold = st.sidebar.number_input(
@@ -354,6 +423,23 @@ st.header("Mean nCPM values")
 st.dataframe(results.ncpm_df, width="stretch")
 
 
+st.header("Top 10 gene-cell type combinations by average nCPM")
+
+try:
+    top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(results, top_n=10)
+
+    if top_ncpm_fig is None or top_ncpm_df.empty:
+        st.info("No nCPM values available for top-10 plotting.")
+    else:
+        st.dataframe(top_ncpm_df, width="stretch")
+        st.pyplot(top_ncpm_fig)
+        plt.close(top_ncpm_fig)
+
+except Exception as e:
+    st.error("Could not create top-10 nCPM plot.")
+    st.exception(e)
+
+
 st.header("nCPM plots by cell type")
 
 if results.ncpm_df.empty:
@@ -374,6 +460,11 @@ st.header("Download outputs")
 unique_tsv = results.unique_to_tissue.to_csv(sep="\t", index=False)
 filtered_tsv = results.filtered.to_csv(sep="\t", index=False)
 ncpm_tsv = results.ncpm_df.to_csv(sep="\t", index=False)
+
+if "top_ncpm_df" in locals() and not top_ncpm_df.empty:
+    top_ncpm_tsv = top_ncpm_df.to_csv(sep="\t", index=False)
+else:
+    top_ncpm_tsv = ""
 
 safe_tissue = safe_filename(results.selected_tissue)
 pdf_filename = f"MendelCell_report_{safe_tissue}.pdf"
@@ -419,3 +510,11 @@ st.download_button(
     file_name="candidate_gene_ncpm_by_cell_type.tsv",
     mime="text/tab-separated-values"
 )
+
+if top_ncpm_tsv:
+    st.download_button(
+        label="Download top 10 average nCPM TSV",
+        data=top_ncpm_tsv,
+        file_name="top_10_gene_cell_type_average_ncpm.tsv",
+        mime="text/tab-separated-values"
+    )

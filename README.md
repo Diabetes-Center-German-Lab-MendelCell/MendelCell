@@ -1,3 +1,12 @@
+---
+title: MendelCell
+emoji: 🧬
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 8501
+pinned: false
+---
 # MendelCell
 
 MendelCell is a Python package for prioritizing candidate genes by tissue-specific single-cell expression using Human Protein Atlas single-cell expression files.

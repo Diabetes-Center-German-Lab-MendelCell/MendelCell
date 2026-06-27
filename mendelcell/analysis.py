@@ -23,6 +23,7 @@ IMMUNE_TISSUE_ALIASES = {
     "haematopoietic",
 }
 
+
 # Strict immune-cell regex patterns.
 # These avoid accidental matches like:
 # - duct cells
@@ -46,9 +47,11 @@ IMMUNE_CELL_PATTERNS = [
     r"\bnatural\s+killer\b",
     r"\blymphocytes?\b",
     r"\bmonocytes?\b",
+    r"\bmonocyte\s+progenitors?\b",
     r"\bmacrophages?\b",
     r"\bdendritic\b",
     r"\bneutrophils?\b",
+    r"\bneutrophil\s+progenitors?\b",
     r"\beosinophils?\b",
     r"\bbasophils?\b",
     r"\bmast\s+cells?\b",
@@ -61,8 +64,9 @@ IMMUNE_CELL_PATTERNS = [
     r"\bkupffer\b",
 ]
 
-# Explicit exclusions for common non-immune cell types that can otherwise be
-# accidentally captured by broad text matching.
+
+# Explicit exclusions for common non-immune epithelial/endocrine cell types
+# that can otherwise be accidentally captured by loose text matching.
 NON_IMMUNE_CELL_PATTERNS = [
     r"\bduct\s+cells?\b",
     r"\bislet\s+cells?\b",
@@ -76,6 +80,11 @@ NON_IMMUNE_CELL_PATTERNS = [
     r"\bbeta\s+cells?\b",
     r"\balpha\s+cells?\b",
     r"\bdelta\s+cells?\b",
+    r"\bpancreatic\s+duct\s+cells?\b",
+    r"\bpancreatic\s+islet\s+cells?\b",
+    r"\bsalivary\s+duct\s+cells?\b",
+    r"\bprostatic\s+club\s+cells?\b",
+    r"\bconjunctival\s+goblet\s+cells?\b",
 ]
 
 
@@ -96,15 +105,25 @@ class MendelCellResults:
 
     @property
     def cell_count_df(self) -> pd.DataFrame:
-        """Number of candidate genes found in each cell type."""
+        """Number and names of candidate genes found in each cell type."""
         if self.filtered.empty:
-            return pd.DataFrame(columns=["Cell type", "Gene count"])
+            return pd.DataFrame(
+                columns=["Cell type", "Gene count", "Candidate genes"]
+            )
 
         return (
-            self.filtered.groupby("Cell type")["Gene name"]
-            .nunique()
-            .reset_index(name="Gene count")
-            .sort_values("Gene count", ascending=False)
+            self.filtered.groupby("Cell type")
+            .agg(
+                **{
+                    "Gene count": ("Gene name", "nunique"),
+                    "Candidate genes": (
+                        "Gene name",
+                        lambda genes: ", ".join(sorted(set(genes))),
+                    ),
+                }
+            )
+            .reset_index()
+            .sort_values(["Gene count", "Cell type"], ascending=[False, True])
             .reset_index(drop=True)
         )
 
@@ -454,3 +473,4 @@ def run_mendelcell_from_files(
         tissue=tissue,
         threshold=threshold,
     )
+

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 
 import pandas as pd
 
@@ -22,41 +23,59 @@ IMMUNE_TISSUE_ALIASES = {
     "haematopoietic",
 }
 
-IMMUNE_CELL_KEYWORDS = [
-    "t cell",
-    "t-cell",
-    "t cells",
-    "t-cells",
-    "cd4",
-    "cd8",
-    "helper t",
-    "cytotoxic t",
-    "regulatory t",
-    "treg",
-    "b cell",
-    "b-cell",
-    "b cells",
-    "b-cells",
-    "plasma cell",
-    "plasmablast",
-    "nk cell",
-    "nk-cell",
-    "natural killer",
-    "lymphocyte",
-    "monocyte",
-    "macrophage",
-    "dendritic",
-    "neutrophil",
-    "eosinophil",
-    "basophil",
-    "mast cell",
-    "myeloid",
-    "granulocyte",
-    "leukocyte",
-    "leucocyte",
-    "microglia",
-    "kupffer",
-    "immune cell",
+# Strict immune-cell regex patterns.
+# These avoid accidental matches like:
+# - duct cells
+# - islet cells
+# - goblet cells
+# - tuft cells
+# - club cells
+IMMUNE_CELL_PATTERNS = [
+    r"\bimmune\s+cells?\b",
+    r"\bt\s*-?\s*cells?\b",
+    r"\bcd4\b",
+    r"\bcd8\b",
+    r"\bhelper\s+t\b",
+    r"\bcytotoxic\s+t\b",
+    r"\bregulatory\s+t\b",
+    r"\btreg\b",
+    r"\bb\s*-?\s*cells?\b",
+    r"\bplasma\s+cells?\b",
+    r"\bplasmablasts?\b",
+    r"\bnk\s*-?\s*cells?\b",
+    r"\bnatural\s+killer\b",
+    r"\blymphocytes?\b",
+    r"\bmonocytes?\b",
+    r"\bmacrophages?\b",
+    r"\bdendritic\b",
+    r"\bneutrophils?\b",
+    r"\beosinophils?\b",
+    r"\bbasophils?\b",
+    r"\bmast\s+cells?\b",
+    r"\bmyeloid\b",
+    r"\bgranulocytes?\b",
+    r"\bleukocytes?\b",
+    r"\bleucocytes?\b",
+    r"\bmicroglia\b",
+    r"\bkupffer\s+cells?\b",
+    r"\bkupffer\b",
+]
+
+# Explicit exclusions for common non-immune cell types that can otherwise be
+# accidentally captured by broad text matching.
+NON_IMMUNE_CELL_PATTERNS = [
+    r"\bduct\s+cells?\b",
+    r"\bislet\s+cells?\b",
+    r"\bgoblet\s+cells?\b",
+    r"\bclub\s+cells?\b",
+    r"\btuft\s+cells?\b",
+    r"\bepithelial\s+cells?\b",
+    r"\bendocrine\s+cells?\b",
+    r"\bexocrine\s+cells?\b",
+    r"\bacinar\s+cells?\b",
+    r"\bbeta\s+cells?\b",
+    r"\balpha\s+cells?\b",
+    r"\bdelta\s+cells?\b",
 ]
 
 
@@ -182,10 +201,13 @@ def resolve_tissue_name(tissue: str, valid_tissues: list[str]) -> str:
 
 def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[str]:
     """
-    Find immune-related cell types by matching common immune-cell keywords.
+    Find immune-related cell types using strict regex matching.
 
     This creates a pseudo-tissue called 'Immune cells' by collecting immune
     cell types across the reference data.
+
+    It also excludes common non-immune epithelial/endocrine cell types that
+    can be accidentally captured by loose text matching.
     """
     cell_types = set()
 
@@ -207,11 +229,23 @@ def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[st
             .unique()
         )
 
-    immune_cells = sorted(
-        cell_type
-        for cell_type in cell_types
-        if any(keyword in cell_type.lower() for keyword in IMMUNE_CELL_KEYWORDS)
-    )
+    immune_cells = []
+
+    for cell_type in sorted(cell_types):
+        cell_type_lower = cell_type.lower()
+
+        is_immune = any(
+            re.search(pattern, cell_type_lower)
+            for pattern in IMMUNE_CELL_PATTERNS
+        )
+
+        is_non_immune = any(
+            re.search(pattern, cell_type_lower)
+            for pattern in NON_IMMUNE_CELL_PATTERNS
+        )
+
+        if is_immune and not is_non_immune:
+            immune_cells.append(cell_type)
 
     if not immune_cells:
         raise ValueError("No immune cell types were found in the reference data.")

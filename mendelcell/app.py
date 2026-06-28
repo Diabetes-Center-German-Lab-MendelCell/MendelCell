@@ -31,15 +31,14 @@ st.set_page_config(
     layout="wide",
 )
 
-# Reduce left and right page margins.
-# This makes the app area wider without using the huge default side padding.
+# Reduce left/right margins and allow the graph to use more screen space.
 st.markdown(
     """
     <style>
     .block-container {
-        max-width: 1200px;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        max-width: 1600px;
+        padding-left: 1rem;
+        padding-right: 1rem;
         padding-top: 2rem;
     }
     </style>
@@ -61,11 +60,11 @@ st.write(
 # Helper functions
 # -----------------------------
 
-def show_dataframe_with_1_index(df, height=400, width=1050):
+def show_dataframe_with_1_index(df, height=400, width=1400):
     """
     Display a dataframe in Streamlit with row numbering starting at 1.
 
-    Uses a fixed pixel width to reduce layout shifting.
+    A fixed pixel width helps reduce Streamlit layout shifting.
     """
     display_df = df.copy()
     display_df.index = range(1, len(display_df) + 1)
@@ -123,15 +122,13 @@ def read_gene_list(file_name, file_bytes):
 
 def make_top_ncpm_plot(results, top_n=10):
     """
-    Plot the top gene-cell type combinations by average nCPM.
+    Plot the top cell-gene combinations by average nCPM.
 
     X-axis:
     - Cell type + gene combination
 
     Y-axis:
     - Average nCPM
-
-    Bars are sorted so the highest value starts from the left.
     """
     if results.ncpm_df.empty:
         return None, pd.DataFrame()
@@ -172,28 +169,38 @@ def make_top_ncpm_plot(results, top_n=10):
         + top_df["Gene name"].astype(str)
     )
 
-    # Wider figure for long x-axis labels.
-    fig_width = max(10, 0.75 * len(top_df))
-    fig, ax = plt.subplots(figsize=(fig_width, 6))
+    # Important:
+    # Do NOT make the figure extremely wide for Top 50.
+    # A very wide/short figure gets shrunk by Streamlit and looks tiny.
+    fig_width = 18
+    fig_height = 9
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=140)
 
     ax.bar(top_df["Cell type + gene"], top_df["Average nCPM"])
 
-    ax.set_xlabel("Cell type and gene")
-    ax.set_ylabel("Average nCPM")
-    ax.set_title(f"Top {top_n} cell-gene combinations by average nCPM")
+    ax.set_xlabel("Cell type and gene", fontsize=13)
+    ax.set_ylabel("Average nCPM", fontsize=13)
+    ax.set_title(
+        f"Top {top_n} cell-gene combinations by average nCPM",
+        fontsize=16,
+        pad=18,
+    )
 
-    ax.tick_params(axis="x", rotation=45)
+    ax.tick_params(axis="x", rotation=60, labelsize=8)
+    ax.tick_params(axis="y", labelsize=11)
 
     for label in ax.get_xticklabels():
         label.set_ha("right")
 
-    # Reduce plot left/right margins and keep enough bottom room for labels.
-    ax.margins(x=0.01)
+    # Small left/right plot margins, larger bottom margin for long x labels.
+    ax.margins(x=0.005)
+
     fig.subplots_adjust(
         left=0.06,
-        right=0.99,
-        bottom=0.36,
-        top=0.88,
+        right=0.995,
+        bottom=0.40,
+        top=0.90,
     )
 
     return fig, top_df
@@ -324,7 +331,7 @@ st.success(
 )
 
 with st.expander("Preview uploaded gene list"):
-    show_dataframe_with_1_index(gene_table.head(20), height=250, width=700)
+    show_dataframe_with_1_index(gene_table.head(20), height=250, width=900)
 
 
 # -----------------------------
@@ -414,9 +421,9 @@ try:
     if top_ncpm_fig is None or top_ncpm_df.empty:
         st.info(f"No nCPM values available for top-{top_n} plotting.")
     else:
-        st.pyplot(top_ncpm_fig, width="content", clear_figure=True)
+        st.pyplot(top_ncpm_fig, width="stretch", clear_figure=True)
 
-        show_dataframe_with_1_index(top_ncpm_df, height=400, width=1050)
+        show_dataframe_with_1_index(top_ncpm_df, height=400, width=1400)
 
 except Exception as e:
     st.error(f"Could not create top-{top_n} nCPM plot.")

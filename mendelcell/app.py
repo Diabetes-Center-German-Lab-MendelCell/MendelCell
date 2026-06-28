@@ -395,10 +395,12 @@ except Exception as e:
 
 st.success("Analysis complete.")
 
-col1, col2 = st.columns(2)
+col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("Input genes", len(results.gene_symbols))
-col2.metric(
+col2.metric("Tissue-specific cell types", len(results.unique_cells))
+col3.metric("Genes passing threshold", results.filtered["Gene name"].nunique())
+col4.metric(
     "Gene-cell pairs",
     len(results.filtered[["Cell type", "Gene name"]].drop_duplicates()),
 )

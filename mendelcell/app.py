@@ -239,6 +239,14 @@ threshold = st.sidebar.number_input(
     step=0.5,
 )
 
+top_n = st.sidebar.number_input(
+    "Number of gene-cell type combinations to show",
+    min_value=1,
+    max_value=100,
+    value=10,
+    step=1,
+)
+
 run_button = st.sidebar.button("Run MendelCell analysis")
 
 
@@ -412,13 +420,13 @@ col4.metric(
     len(results.filtered[["Cell type", "Gene name"]].drop_duplicates()),
 )
 
-st.header("Top 10 gene-cell type combinations by average nCPM")
+st.header(f"Top {top_n} gene-cell type combinations by average nCPM")
 
 try:
-    top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(results, top_n=10)
+    top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(results, top_n=top_n)
 
     if top_ncpm_fig is None or top_ncpm_df.empty:
-        st.info("No nCPM values available for top-10 plotting.")
+        st.info(f"No nCPM values available for top-{top_n} plotting.")
     else:
         st.pyplot(top_ncpm_fig)
         plt.close(top_ncpm_fig)
@@ -426,7 +434,7 @@ try:
         show_dataframe_with_1_index(top_ncpm_df)
 
 except Exception as e:
-    st.error("Could not create top-10 nCPM plot.")
+    st.error(f"Could not create top-{top_n} nCPM plot.")
     st.exception(e)
 
 
@@ -494,8 +502,8 @@ st.download_button(
 
 if top_ncpm_tsv:
     st.download_button(
-        label="Download top 10 average nCPM TSV",
+        label=f"Download top {top_n} average nCPM TSV",
         data=top_ncpm_tsv,
-        file_name="top_10_gene_cell_type_average_ncpm.tsv",
+        file_name=f"top_{top_n}_gene_cell_type_average_ncpm.tsv",
         mime="text/tab-separated-values",
     )

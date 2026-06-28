@@ -425,11 +425,6 @@ if not results.plot_df.empty:
     st.pyplot(fig)
     plt.close(fig)
 
-
-st.header("Candidate genes found in each cell type")
-show_dataframe_with_1_index(results.genes_in_cell_df)
-
-
 st.header("Filtered candidate genes")
 show_dataframe_with_1_index(results.filtered_report)
 

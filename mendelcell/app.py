@@ -45,13 +45,13 @@ st.write(
 # Helper functions
 # -----------------------------
 
-def show_dataframe_with_1_index(df):
+def show_dataframe_with_1_index(df, height=400):
     """
     Display a dataframe in Streamlit with row numbering starting at 1.
     """
     display_df = df.copy()
     display_df.index = range(1, len(display_df) + 1)
-    st.dataframe(display_df, width="stretch")
+    st.dataframe(display_df, width="stretch", height=height)
 
 
 def load_reference_data():
@@ -122,40 +122,11 @@ def make_gene_count_plot(results):
     return fig
 
 
-def make_ncpm_plot(results, cell_type):
-    """
-    Create nCPM plot for one cell type.
-    """
-    cell_df = results.ncpm_df[results.ncpm_df["Cell type"] == cell_type]
-    cell_df = cell_df.sort_values("nCPM", ascending=False)
-
-    fig, ax = plt.subplots(figsize=(11, 6))
-
-    ax.bar(cell_df["Gene name"], cell_df["nCPM"])
-    ax.set_xlabel("Gene")
-    ax.set_ylabel("Mean nCPM")
-    ax.set_title(f"Mean nCPM of candidate genes in {cell_type}")
-
-    ax.tick_params(axis="x", rotation=45)
-
-    for label in ax.get_xticklabels():
-        label.set_ha("right")
-
-    fig.tight_layout()
-    return fig
-
-
 def make_top_ncpm_plot(results, top_n=10):
     """
     Plot the top gene-cell type combinations by average nCPM.
 
-    X-axis:
-    - Gene name + cell type combination
-
-    Y-axis:
-    - Average nCPM
-
-    Bars are sorted so the highest value starts from the left.
+    Uses a horizontal bar plot to prevent layout shaking from long labels.
     """
     if results.ncpm_df.empty:
         return None, pd.DataFrame()
@@ -183,7 +154,7 @@ def make_top_ncpm_plot(results, top_n=10):
         .mean()
         .rename(columns={"nCPM": "Average nCPM"})
         .sort_values("Average nCPM", ascending=False)
-        .head(top_n)
+        .head(int(top_n))
         .reset_index(drop=True)
     )
 
@@ -196,18 +167,17 @@ def make_top_ncpm_plot(results, top_n=10):
         + top_df["Cell type"].astype(str)
     )
 
-    fig, ax = plt.subplots(figsize=(13, 6))
+    # Reverse order so the largest value appears at the top of the plot.
+    plot_ready = top_df.iloc[::-1].copy()
 
-    ax.bar(top_df["Gene + cell type"], top_df["Average nCPM"])
+    fig_height = max(5, 0.45 * len(plot_ready))
+    fig, ax = plt.subplots(figsize=(12, fig_height))
 
-    ax.set_xlabel("Gene and cell type")
-    ax.set_ylabel("Average nCPM")
+    ax.barh(plot_ready["Gene + cell type"], plot_ready["Average nCPM"])
+
+    ax.set_xlabel("Average nCPM")
+    ax.set_ylabel("Gene and cell type")
     ax.set_title(f"Top {top_n} gene-cell type combinations by average nCPM")
-
-    ax.tick_params(axis="x", rotation=45)
-
-    for label in ax.get_xticklabels():
-        label.set_ha("right")
 
     fig.tight_layout()
 
@@ -339,7 +309,7 @@ st.success(
 )
 
 with st.expander("Preview uploaded gene list"):
-    show_dataframe_with_1_index(gene_table.head(20))
+    show_dataframe_with_1_index(gene_table.head(20), height=250)
 
 
 # -----------------------------
@@ -420,6 +390,16 @@ col4.metric(
     len(results.filtered[["Cell type", "Gene name"]].drop_duplicates()),
 )
 
+
+st.header("Candidate gene count per cell type")
+show_dataframe_with_1_index(results.cell_count_df, height=400)
+
+if not results.plot_df.empty:
+    fig = make_gene_count_plot(results)
+    st.pyplot(fig)
+    plt.close(fig)
+
+
 st.header(f"Top {top_n} gene-cell type combinations by average nCPM")
 
 try:
@@ -431,13 +411,11 @@ try:
         st.pyplot(top_ncpm_fig)
         plt.close(top_ncpm_fig)
 
-        show_dataframe_with_1_index(top_ncpm_df)
+        show_dataframe_with_1_index(top_ncpm_df, height=400)
 
 except Exception as e:
     st.error(f"Could not create top-{top_n} nCPM plot.")
     st.exception(e)
-
-
 
 
 # -----------------------------
@@ -449,6 +427,7 @@ st.header("Download outputs")
 unique_tsv = results.unique_to_tissue.to_csv(sep="\t", index=False)
 filtered_tsv = results.filtered.to_csv(sep="\t", index=False)
 ncpm_tsv = results.ncpm_df.to_csv(sep="\t", index=False)
+cell_count_tsv = results.cell_count_df.to_csv(sep="\t", index=False)
 
 if "top_ncpm_df" in locals() and not top_ncpm_df.empty:
     top_ncpm_tsv = top_ncpm_df.to_csv(sep="\t", index=False)
@@ -478,6 +457,13 @@ except Exception as e:
     st.error("Could not create PDF report.")
     st.exception(e)
 
+
+st.download_button(
+    label="Download candidate gene count TSV",
+    data=cell_count_tsv,
+    file_name="candidate_gene_count_per_cell_type.tsv",
+    mime="text/tab-separated-values",
+)
 
 st.download_button(
     label="Download unique cell types TSV",

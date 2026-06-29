@@ -1,4 +1,5 @@
 from pathlib import Path
+import base64
 import io
 import tempfile
 
@@ -32,7 +33,7 @@ st.set_page_config(
 )
 
 # Stable layout:
-# - Forces the vertical scrollbar to always exist, preventing left/right page jumps
+# - Forces vertical scrollbar to always exist, preventing left-right page jumps
 # - Prevents horizontal overflow
 # - Reduces left/right margins
 # - Keeps the main content at a stable width
@@ -97,27 +98,35 @@ def show_dataframe_with_1_index(df, height=400, width=1200):
     )
 
 
-def show_matplotlib_figure(fig, width=1200):
+def show_matplotlib_svg(fig, width=1200):
     """
-    Render a matplotlib figure as a fixed-width PNG.
+    Render a matplotlib figure as a fixed-width SVG.
 
-    This is more stable than st.pyplot for this app because it prevents
-    Streamlit from constantly recalculating plot width during reruns.
+    SVG keeps axis labels sharp and prevents blurry text.
+    The fixed-width wrapper also prevents left-right layout shaking.
     """
     buffer = io.BytesIO()
 
     fig.savefig(
         buffer,
-        format="png",
-        dpi=150,
+        format="svg",
         bbox_inches="tight",
     )
 
     buffer.seek(0)
 
-    st.image(
-        buffer,
-        width=width,
+    svg_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    st.markdown(
+        f"""
+        <div style="width: {width}px; max-width: 100%; overflow-x: hidden;">
+            <img
+                src="data:image/svg+xml;base64,{svg_base64}"
+                style="width: {width}px; max-width: 100%; height: auto;"
+            />
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -215,20 +224,21 @@ def make_top_ncpm_plot(results, top_n=10):
     )
 
     # Fixed figure size prevents the plot from becoming extremely wide/short.
-    fig, ax = plt.subplots(figsize=(16, 8))
+    # SVG rendering keeps labels sharp even after browser scaling.
+    fig, ax = plt.subplots(figsize=(18, 10))
 
     ax.bar(top_df["Cell type + gene"], top_df["Average nCPM"])
 
-    ax.set_xlabel("Cell type and gene", fontsize=12)
-    ax.set_ylabel("Average nCPM", fontsize=12)
+    ax.set_xlabel("Cell type and gene", fontsize=14)
+    ax.set_ylabel("Average nCPM", fontsize=14)
     ax.set_title(
         f"Top {top_n} cell-gene combinations by average nCPM",
-        fontsize=15,
-        pad=16,
+        fontsize=18,
+        pad=18,
     )
 
-    ax.tick_params(axis="x", rotation=60, labelsize=8)
-    ax.tick_params(axis="y", labelsize=10)
+    ax.tick_params(axis="x", rotation=65, labelsize=9)
+    ax.tick_params(axis="y", labelsize=12)
 
     for label in ax.get_xticklabels():
         label.set_ha("right")
@@ -239,7 +249,7 @@ def make_top_ncpm_plot(results, top_n=10):
     fig.subplots_adjust(
         left=0.07,
         right=0.99,
-        bottom=0.42,
+        bottom=0.46,
         top=0.90,
     )
 
@@ -461,7 +471,7 @@ try:
     if top_ncpm_fig is None or top_ncpm_df.empty:
         st.info(f"No nCPM values available for top-{top_n} plotting.")
     else:
-        show_matplotlib_figure(top_ncpm_fig, width=1200)
+        show_matplotlib_svg(top_ncpm_fig, width=1200)
         plt.close(top_ncpm_fig)
 
         show_dataframe_with_1_index(top_ncpm_df, height=400, width=1200)

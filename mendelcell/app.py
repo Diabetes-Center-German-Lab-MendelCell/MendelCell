@@ -31,6 +31,42 @@ st.set_page_config(
     layout="wide",
 )
 
+# Stable layout:
+# - Forces the vertical scrollbar to always exist, preventing left/right page jumps
+# - Prevents horizontal overflow
+# - Reduces left/right margins
+# - Keeps the main content at a stable width
+st.markdown(
+    """
+    <style>
+    html {
+        overflow-y: scroll;
+        scrollbar-gutter: stable;
+    }
+
+    body {
+        overflow-x: hidden;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        overflow-x: hidden;
+    }
+
+    .block-container {
+        max-width: 1400px;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        padding-top: 2rem;
+    }
+
+    div[data-testid="stDataFrame"] {
+        max-width: 1200px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🧬 MendelCell")
 st.subheader("Candidate gene prioritization by tissue-specific single-cell expression")
 
@@ -45,13 +81,44 @@ st.write(
 # Helper functions
 # -----------------------------
 
-def show_dataframe_with_1_index(df):
+def show_dataframe_with_1_index(df, height=400, width=1200):
     """
     Display a dataframe in Streamlit with row numbering starting at 1.
+
+    Uses a fixed pixel width to prevent Streamlit layout shaking.
     """
     display_df = df.copy()
     display_df.index = range(1, len(display_df) + 1)
-    st.dataframe(display_df, width="stretch")
+
+    st.dataframe(
+        display_df,
+        width=width,
+        height=height,
+    )
+
+
+def show_matplotlib_figure(fig, width=1200):
+    """
+    Render a matplotlib figure as a fixed-width PNG.
+
+    This is more stable than st.pyplot for this app because it prevents
+    Streamlit from constantly recalculating plot width during reruns.
+    """
+    buffer = io.BytesIO()
+
+    fig.savefig(
+        buffer,
+        format="png",
+        dpi=150,
+        bbox_inches="tight",
+    )
+
+    buffer.seek(0)
+
+    st.image(
+        buffer,
+        width=width,
+    )
 
 
 def load_reference_data():
@@ -98,64 +165,15 @@ def read_gene_list(file_name, file_bytes):
     return pd.read_csv(buffer, sep="\t")
 
 
-def make_gene_count_plot(results):
-    """
-    Create bar plot of candidate gene counts per cell type.
-    """
-    fig, ax = plt.subplots(figsize=(11, 6))
-
-    plot_df = results.plot_df
-
-    ax.bar(plot_df["Cell type"], plot_df["Gene count"])
-    ax.set_xlabel("Cell type")
-    ax.set_ylabel("Number of candidate genes")
-    ax.set_title(
-        f"Candidate genes expressed in {results.selected_tissue}-specific cell types"
-    )
-
-    ax.tick_params(axis="x", rotation=45)
-
-    for label in ax.get_xticklabels():
-        label.set_ha("right")
-
-    fig.tight_layout()
-    return fig
-
-
-def make_ncpm_plot(results, cell_type):
-    """
-    Create nCPM plot for one cell type.
-    """
-    cell_df = results.ncpm_df[results.ncpm_df["Cell type"] == cell_type]
-    cell_df = cell_df.sort_values("nCPM", ascending=False)
-
-    fig, ax = plt.subplots(figsize=(11, 6))
-
-    ax.bar(cell_df["Gene name"], cell_df["nCPM"])
-    ax.set_xlabel("Gene")
-    ax.set_ylabel("Mean nCPM")
-    ax.set_title(f"Mean nCPM of candidate genes in {cell_type}")
-
-    ax.tick_params(axis="x", rotation=45)
-
-    for label in ax.get_xticklabels():
-        label.set_ha("right")
-
-    fig.tight_layout()
-    return fig
-
-
 def make_top_ncpm_plot(results, top_n=10):
     """
-    Plot the top gene-cell type combinations by average nCPM.
+    Plot the top cell-gene combinations by average nCPM.
 
     X-axis:
-    - Gene name + cell type combination
+    - Cell type + gene combination
 
     Y-axis:
     - Average nCPM
-
-    Bars are sorted so the highest value starts from the left.
     """
     if results.ncpm_df.empty:
         return None, pd.DataFrame()
@@ -179,37 +197,51 @@ def make_top_ncpm_plot(results, top_n=10):
         return None, pd.DataFrame()
 
     top_df = (
-        plot_df.groupby(["Gene name", "Cell type"], as_index=False)["nCPM"]
+        plot_df.groupby(["Cell type", "Gene name"], as_index=False)["nCPM"]
         .mean()
         .rename(columns={"nCPM": "Average nCPM"})
         .sort_values("Average nCPM", ascending=False)
-        .head(top_n)
+        .head(int(top_n))
         .reset_index(drop=True)
     )
 
     if top_df.empty:
         return None, top_df
 
-    top_df["Gene + cell type"] = (
-        top_df["Gene name"].astype(str)
+    top_df["Cell type + gene"] = (
+        top_df["Cell type"].astype(str)
         + " | "
-        + top_df["Cell type"].astype(str)
+        + top_df["Gene name"].astype(str)
     )
 
-    fig, ax = plt.subplots(figsize=(13, 6))
+    # Fixed figure size prevents the plot from becoming extremely wide/short.
+    fig, ax = plt.subplots(figsize=(16, 8))
 
-    ax.bar(top_df["Gene + cell type"], top_df["Average nCPM"])
+    ax.bar(top_df["Cell type + gene"], top_df["Average nCPM"])
 
-    ax.set_xlabel("Gene and cell type")
-    ax.set_ylabel("Average nCPM")
-    ax.set_title(f"Top {top_n} gene-cell type combinations by average nCPM")
+    ax.set_xlabel("Cell type and gene", fontsize=12)
+    ax.set_ylabel("Average nCPM", fontsize=12)
+    ax.set_title(
+        f"Top {top_n} cell-gene combinations by average nCPM",
+        fontsize=15,
+        pad=16,
+    )
 
-    ax.tick_params(axis="x", rotation=45)
+    ax.tick_params(axis="x", rotation=60, labelsize=8)
+    ax.tick_params(axis="y", labelsize=10)
 
     for label in ax.get_xticklabels():
         label.set_ha("right")
 
-    fig.tight_layout()
+    # Reduce internal left/right whitespace while leaving room for x labels.
+    ax.margins(x=0.005)
+
+    fig.subplots_adjust(
+        left=0.07,
+        right=0.99,
+        bottom=0.42,
+        top=0.90,
+    )
 
     return fig, top_df
 
@@ -339,7 +371,7 @@ st.success(
 )
 
 with st.expander("Preview uploaded gene list"):
-    show_dataframe_with_1_index(gene_table.head(20))
+    show_dataframe_with_1_index(gene_table.head(20), height=250, width=900)
 
 
 # -----------------------------
@@ -420,7 +452,8 @@ col4.metric(
     len(results.filtered[["Cell type", "Gene name"]].drop_duplicates()),
 )
 
-st.header(f"Top {top_n} gene-cell type combinations by average nCPM")
+
+st.header(f"Top {top_n} cell-gene combinations by average nCPM")
 
 try:
     top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(results, top_n=top_n)
@@ -428,16 +461,14 @@ try:
     if top_ncpm_fig is None or top_ncpm_df.empty:
         st.info(f"No nCPM values available for top-{top_n} plotting.")
     else:
-        st.pyplot(top_ncpm_fig)
+        show_matplotlib_figure(top_ncpm_fig, width=1200)
         plt.close(top_ncpm_fig)
 
-        show_dataframe_with_1_index(top_ncpm_df)
+        show_dataframe_with_1_index(top_ncpm_df, height=400, width=1200)
 
 except Exception as e:
     st.error(f"Could not create top-{top_n} nCPM plot.")
     st.exception(e)
-
-
 
 
 # -----------------------------
@@ -504,6 +535,6 @@ if top_ncpm_tsv:
     st.download_button(
         label=f"Download top {top_n} average nCPM TSV",
         data=top_ncpm_tsv,
-        file_name=f"top_{top_n}_gene_cell_type_average_ncpm.tsv",
+        file_name=f"top_{top_n}_cell_gene_average_ncpm.tsv",
         mime="text/tab-separated-values",
     )

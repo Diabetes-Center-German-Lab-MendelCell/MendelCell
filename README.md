@@ -14,6 +14,8 @@ MendelCell is a Streamlit app that helps prioritize candidate genes by looking a
 
 The app was built to support exploratory analysis of candidate genes from rare disease, monogenic disease, and immune-related genetics projects.
 
+**Disclaimer:** MendelCell is intended for research and exploratory analysis only. It is not a diagnostic tool and should not be used to make clinical decisions.
+
 ## Live App
 
 MendelCell is available on Hugging Face Spaces:

@@ -72,6 +72,11 @@ st.write(
     "and generate ranked tables, plots, and a PDF report."
 )
 
+st.warning(
+    "MendelCell is intended for research and exploratory analysis only. "
+    "It is not a diagnostic tool and should not be used to make clinical decisions."
+)
+
 
 # -----------------------------
 # Helper functions

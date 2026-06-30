@@ -32,11 +32,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Stable layout:
-# - Forces vertical scrollbar to always exist, preventing left-right page jumps
-# - Prevents horizontal overflow
-# - Reduces left/right margins
-# - Keeps the main content at a stable width
 st.markdown(
     """
     <style>
@@ -130,12 +125,12 @@ def show_matplotlib_svg(fig, width=1200):
     )
 
 
+@st.cache_data
 def load_reference_data():
     """
     Load preprocessed HPA reference files.
 
-    The reference files are loaded only after the user uploads a gene list
-    and clicks Run.
+    The reference files are cached after loading.
     """
     if not CLUSTER_REFERENCE.exists():
         raise FileNotFoundError(
@@ -151,6 +146,23 @@ def load_reference_data():
     hpa = pd.read_parquet(CELLTYPE_REFERENCE)
 
     return clusters, hpa
+
+
+@st.cache_data
+def load_available_tissues():
+    """
+    Load available tissues for display on the homepage.
+
+    This only reads the cluster reference file so users can see tissue options
+    before uploading a gene list.
+    """
+    if not CLUSTER_REFERENCE.exists():
+        raise FileNotFoundError(
+            f"Missing cluster reference file: {CLUSTER_REFERENCE}"
+        )
+
+    clusters = pd.read_parquet(CLUSTER_REFERENCE)
+    return list_tissues(clusters)
 
 
 def read_gene_list(file_name, file_bytes):
@@ -223,8 +235,6 @@ def make_top_ncpm_plot(results, top_n=10):
         + top_df["Gene name"].astype(str)
     )
 
-    # Fixed figure size prevents the plot from becoming extremely wide/short.
-    # SVG rendering keeps labels sharp even after browser scaling.
     fig, ax = plt.subplots(figsize=(18, 10))
 
     ax.bar(top_df["Cell type + gene"], top_df["Average nCPM"])
@@ -243,7 +253,6 @@ def make_top_ncpm_plot(results, top_n=10):
     for label in ax.get_xticklabels():
         label.set_ha("right")
 
-    # Reduce internal left/right whitespace while leaving room for x labels.
     ax.margins(x=0.005)
 
     fig.subplots_adjust(
@@ -318,6 +327,33 @@ with st.expander("Reference file status"):
         )
     else:
         st.error("Cell-type reference file is missing.")
+
+
+# -----------------------------
+# Available tissues on homepage
+# -----------------------------
+
+st.header("Available tissues")
+
+st.write(
+    "Enter one of these tissue names in the sidebar. "
+    "You can also enter **Immune cells** to analyze immune-related cell types."
+)
+
+try:
+    available_tissues = load_available_tissues()
+
+    tissue_df = pd.DataFrame(
+        {
+            "Tissue name": available_tissues
+        }
+    )
+
+    with st.expander("Show available tissue names", expanded=True):
+        show_dataframe_with_1_index(tissue_df, height=300, width=600)
+
+except Exception as e:
+    st.warning(f"Could not load available tissue names: {e}")
 
 
 # -----------------------------
@@ -410,20 +446,6 @@ except Exception as e:
     st.error("Could not load MendelCell reference files.")
     st.exception(e)
     st.stop()
-
-
-# -----------------------------
-# Optional available tissues display
-# -----------------------------
-
-try:
-    available_tissues = list_tissues(clusters)
-
-    with st.expander("Available tissues in reference"):
-        st.write(available_tissues)
-
-except Exception as e:
-    st.warning(f"Could not list available tissues: {e}")
 
 
 # -----------------------------

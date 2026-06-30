@@ -329,31 +329,7 @@ with st.expander("Reference file status"):
         st.error("Cell-type reference file is missing.")
 
 
-# -----------------------------
-# Available tissues on homepage
-# -----------------------------
 
-st.header("Available tissues")
-
-st.write(
-    "Enter one of these tissue names in the sidebar. "
-    "You can also enter **Immune cells** to analyze immune-related cell types."
-)
-
-try:
-    available_tissues = load_available_tissues()
-
-    tissue_df = pd.DataFrame(
-        {
-            "Tissue name": available_tissues
-        }
-    )
-
-    with st.expander("Show available tissue names", expanded=True):
-        show_dataframe_with_1_index(tissue_df, height=300, width=600)
-
-except Exception as e:
-    st.warning(f"Could not load available tissue names: {e}")
 
 
 # -----------------------------
@@ -384,19 +360,28 @@ if gene_file is None:
         """
     )
 
-    st.stop()
+    st.header("Available tissues")
 
+    st.write(
+        "Enter one of these tissue names in the sidebar. "
+        "You can also enter **Immune cells** to analyze immune-related cell types."
+    )
 
-# -----------------------------
-# Read gene list
-# -----------------------------
+    try:
+        available_tissues = load_available_tissues()
 
-try:
-    gene_table = read_gene_list(gene_file.name, gene_file.getvalue())
+        tissue_df = pd.DataFrame(
+            {
+                "Tissue name": available_tissues
+            }
+        )
 
-except Exception as e:
-    st.error(f"Could not read gene list file: {e}")
-    st.exception(e)
+        with st.expander("Show available tissue names", expanded=True):
+            show_dataframe_with_1_index(tissue_df, height=300, width=600)
+
+    except Exception as e:
+        st.warning(f"Could not load available tissue names: {e}")
+
     st.stop()
 
 

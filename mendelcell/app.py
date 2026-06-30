@@ -17,9 +17,11 @@ from mendelcell.report import create_pdf_report, safe_filename
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
+EXAMPLES_DIR = ROOT_DIR / "examples"
 
 CLUSTER_REFERENCE = DATA_DIR / "mendelcell_clusters_reference.parquet"
 CELLTYPE_REFERENCE = DATA_DIR / "mendelcell_celltype_reference.parquet"
+EXAMPLE_GENE_LIST = EXAMPLES_DIR / "example_gene_list.tsv"
 
 
 # -----------------------------
@@ -32,6 +34,11 @@ st.set_page_config(
     layout="wide",
 )
 
+# Stable layout:
+# - Forces vertical scrollbar to always exist, preventing left-right page jumps
+# - Prevents horizontal overflow
+# - Reduces left/right margins
+# - Keeps the main content at a stable width
 st.markdown(
     """
     <style>
@@ -276,9 +283,15 @@ def make_top_ncpm_plot(results, top_n=10):
 
 st.sidebar.header("1. Upload gene list")
 
+use_example_gene_list = st.sidebar.checkbox(
+    "Use example gene list",
+    value=False,
+)
+
 gene_file = st.sidebar.file_uploader(
     "Upload candidate gene list TSV, TXT, or CSV",
     type=["tsv", "txt", "csv"],
+    disabled=use_example_gene_list,
 )
 
 st.sidebar.header("2. Choose settings")
@@ -333,16 +346,23 @@ with st.expander("Reference file status"):
     else:
         st.error("Cell-type reference file is missing.")
 
+    st.code(str(EXAMPLE_GENE_LIST))
 
-
+    if EXAMPLE_GENE_LIST.exists():
+        st.success("Example gene list found.")
+    else:
+        st.warning("Example gene list is missing.")
 
 
 # -----------------------------
 # Stop if no gene file uploaded
 # -----------------------------
 
-if gene_file is None:
-    st.info("Upload a candidate gene list to begin.")
+if gene_file is None and not use_example_gene_list:
+    st.info(
+        "Upload a candidate gene list to begin, "
+        "or select **Use example gene list** in the sidebar."
+    )
 
     st.markdown(
         """
@@ -361,6 +381,12 @@ if gene_file is None:
         PDX1
         CD3D
         PTPRC
+        ```
+
+        To test the app on Hugging Face without uploading your own file, select:
+
+        ```text
+        Use example gene list
         ```
         """
     )
@@ -391,6 +417,30 @@ if gene_file is None:
 
 
 # -----------------------------
+# Read gene list
+# -----------------------------
+
+try:
+    if use_example_gene_list:
+        if not EXAMPLE_GENE_LIST.exists():
+            raise FileNotFoundError(
+                f"Missing example gene list file: {EXAMPLE_GENE_LIST}"
+            )
+
+        gene_table = pd.read_csv(EXAMPLE_GENE_LIST, sep="\t")
+        gene_file_name = EXAMPLE_GENE_LIST.name
+
+    else:
+        gene_table = read_gene_list(gene_file.name, gene_file.getvalue())
+        gene_file_name = gene_file.name
+
+except Exception as e:
+    st.error(f"Could not read gene list file: {e}")
+    st.exception(e)
+    st.stop()
+
+
+# -----------------------------
 # Validate gene list
 # -----------------------------
 
@@ -402,11 +452,11 @@ if "Gene Symbol" not in gene_table.columns:
 
 
 st.success(
-    f"Gene list uploaded: {gene_table.shape[0]:,} rows and "
-    f"{gene_table.shape[1]:,} columns"
+    f"Gene list loaded: {gene_file_name} "
+    f"({gene_table.shape[0]:,} rows and {gene_table.shape[1]:,} columns)"
 )
 
-with st.expander("Preview uploaded gene list"):
+with st.expander("Preview gene list"):
     show_dataframe_with_1_index(gene_table.head(20), height=250, width=900)
 
 

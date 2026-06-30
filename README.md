@@ -62,6 +62,30 @@ IL2RA
 CTLA4
 ```
 
+## Example Input File
+
+A small example gene list is included in the repository:
+
+```text
+examples/example_gene_list.tsv
+```
+
+Users can download or open this file and upload it directly into the MendelCell app to test that the app is working.
+
+Example contents:
+
+```text
+Gene Symbol
+INS
+GCG
+PDX1
+CD3D
+PTPRC
+IL2RA
+CTLA4
+```
+
+
 ## Tissue Options
 
 You can enter tissue names such as:

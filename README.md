@@ -98,3 +98,15 @@ MendelCell generates:
 * Downloadable TSV files
 * A downloadable PDF report
 
+## Data Source
+
+MendelCell uses preprocessed Human Protein Atlas single-cell expression data.
+
+Data source:
+Human Protein Atlas, https://www.proteinatlas.org
+
+Reference:
+Karlsson M. et al. A single-cell type transcriptomics map of human tissues. Science Advances. 2021.
+
+HPA data version/download date:
+[insert version or download date here]

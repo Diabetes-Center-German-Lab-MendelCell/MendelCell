@@ -96,11 +96,13 @@ NON_IMMUNE_CELL_PATTERNS = [
 class MendelCellResults:
     selected_tissue: str
     threshold: float
+    non_selected_threshold: float
     gene_symbols: list[str]
     unique_to_tissue: pd.DataFrame
     unique_cells: list[str]
     filtered: pd.DataFrame
     ncpm_df: pd.DataFrame
+    selective_genes_df: pd.DataFrame
     expression_col: str
 
     @property
@@ -224,9 +226,6 @@ def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[st
 
     This creates a pseudo-tissue called 'Immune cells' by collecting immune
     cell types across the reference data.
-
-    It also excludes common non-immune epithelial/endocrine cell types that
-    can be accidentally captured by loose text matching.
     """
     cell_types = set()
 
@@ -273,6 +272,189 @@ def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[st
 
 
 # -----------------------------
+# Selectivity helper
+# -----------------------------
+
+def build_selective_genes_df(
+    hpa: pd.DataFrame,
+    gene_symbols: list[str],
+    selected_cell_types: list[str],
+    expression_col: str,
+    selected_threshold: float,
+    non_selected_threshold: float,
+) -> pd.DataFrame:
+    """
+    Find genes that are high in selected cell types and low in non-selected cells.
+
+    A gene is considered selective if:
+    - Max selected-cell expression >= selected_threshold
+    - Max non-selected-cell expression < non_selected_threshold
+    """
+    output_cols = [
+        "Gene name",
+        "Number of selected cell types",
+        "Selected cell types passing threshold",
+        f"Max selected {expression_col}",
+        f"Mean selected {expression_col}",
+        f"Max non-selected {expression_col}",
+        f"Mean non-selected {expression_col}",
+        "Selected/non-selected max ratio",
+    ]
+
+    if hpa.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    required_cols = ["Gene name", "Gene name clean", "Cell type", expression_col]
+
+    missing_cols = [
+        col for col in required_cols
+        if col not in hpa.columns
+    ]
+
+    if missing_cols:
+        raise ValueError(f"HPA dataframe is missing columns: {missing_cols}")
+
+    expr_df = hpa[required_cols].copy()
+
+    expr_df[expression_col] = pd.to_numeric(
+        expr_df[expression_col],
+        errors="coerce",
+    )
+
+    expr_df = expr_df.dropna(
+        subset=[
+            "Gene name",
+            "Gene name clean",
+            "Cell type",
+            expression_col,
+        ]
+    )
+
+    expr_df = expr_df[expr_df["Gene name clean"].isin(gene_symbols)].copy()
+
+    if expr_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    selected_expr = expr_df[
+        expr_df["Cell type"].isin(selected_cell_types)
+    ].copy()
+
+    non_selected_expr = expr_df[
+        ~expr_df["Cell type"].isin(selected_cell_types)
+    ].copy()
+
+    selected_pass = selected_expr[
+        selected_expr[expression_col] >= selected_threshold
+    ].copy()
+
+    if selected_pass.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    selected_pass_summary = (
+        selected_pass.groupby("Gene name clean")
+        .agg(
+            **{
+                "Gene name": ("Gene name", "first"),
+                "Number of selected cell types": ("Cell type", "nunique"),
+                "Selected cell types passing threshold": (
+                    "Cell type",
+                    lambda cells: ", ".join(sorted(set(cells))),
+                ),
+            }
+        )
+        .reset_index()
+    )
+
+    selected_stats = (
+        selected_expr.groupby("Gene name clean")
+        .agg(
+            **{
+                f"Max selected {expression_col}": (expression_col, "max"),
+                f"Mean selected {expression_col}": (expression_col, "mean"),
+            }
+        )
+        .reset_index()
+    )
+
+    if non_selected_expr.empty:
+        non_selected_stats = pd.DataFrame(
+            {
+                "Gene name clean": selected_pass_summary["Gene name clean"],
+                f"Max non-selected {expression_col}": 0.0,
+                f"Mean non-selected {expression_col}": 0.0,
+            }
+        )
+    else:
+        non_selected_stats = (
+            non_selected_expr.groupby("Gene name clean")
+            .agg(
+                **{
+                    f"Max non-selected {expression_col}": (expression_col, "max"),
+                    f"Mean non-selected {expression_col}": (expression_col, "mean"),
+                }
+            )
+            .reset_index()
+        )
+
+    summary_df = selected_pass_summary.merge(
+        selected_stats,
+        on="Gene name clean",
+        how="left",
+    )
+
+    summary_df = summary_df.merge(
+        non_selected_stats,
+        on="Gene name clean",
+        how="left",
+    )
+
+    max_selected_col = f"Max selected {expression_col}"
+    mean_selected_col = f"Mean selected {expression_col}"
+    max_non_selected_col = f"Max non-selected {expression_col}"
+    mean_non_selected_col = f"Mean non-selected {expression_col}"
+    ratio_col = "Selected/non-selected max ratio"
+
+    summary_df[max_non_selected_col] = summary_df[max_non_selected_col].fillna(0.0)
+    summary_df[mean_non_selected_col] = summary_df[mean_non_selected_col].fillna(0.0)
+
+    denominator = summary_df[max_non_selected_col].replace(0, pd.NA)
+
+    summary_df[ratio_col] = (
+        summary_df[max_selected_col] / denominator
+    )
+
+    summary_df[ratio_col] = summary_df[ratio_col].fillna(float("inf"))
+
+    summary_df = summary_df[
+        (summary_df[max_selected_col] >= selected_threshold)
+        & (summary_df[max_non_selected_col] < non_selected_threshold)
+    ].copy()
+
+    if summary_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    for col in [
+        max_selected_col,
+        mean_selected_col,
+        max_non_selected_col,
+        mean_non_selected_col,
+        ratio_col,
+    ]:
+        summary_df[col] = summary_df[col].round(2)
+
+    summary_df = (
+        summary_df[output_cols]
+        .sort_values(
+            [ratio_col, max_selected_col, "Gene name"],
+            ascending=[False, False, True],
+        )
+        .reset_index(drop=True)
+    )
+
+    return summary_df
+
+
+# -----------------------------
 # Main analysis
 # -----------------------------
 
@@ -282,28 +464,13 @@ def run_mendelcell(
     gene_table: pd.DataFrame,
     tissue: str,
     threshold: float = 1.0,
+    non_selected_threshold: float | None = None,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis.
-
-    Parameters
-    ----------
-    clusters:
-        HPA single-cell cluster dataframe.
-
-    hpa:
-        HPA single-cell cell-type dataframe.
-
-    gene_table:
-        Candidate gene table. Must contain a column named 'Gene Symbol'.
-
-    tissue:
-        Tissue name, such as 'Pancreas', or the special pseudo-tissue
-        'Immune cells'.
-
-    threshold:
-        Expression threshold for the HPA cell-type expression value.
     """
+    if non_selected_threshold is None:
+        non_selected_threshold = threshold
 
     clusters, hpa, gene_symbols, expression_col = clean_input_tables(
         clusters=clusters,
@@ -383,6 +550,19 @@ def run_mendelcell(
         )
 
     # -----------------------------
+    # Build selective genes table
+    # -----------------------------
+
+    selective_genes_df = build_selective_genes_df(
+        hpa=hpa,
+        gene_symbols=gene_symbols,
+        selected_cell_types=unique_cells,
+        expression_col=expression_col,
+        selected_threshold=threshold,
+        non_selected_threshold=non_selected_threshold,
+    )
+
+    # -----------------------------
     # Build nCPM table for plots/report
     # -----------------------------
 
@@ -436,11 +616,13 @@ def run_mendelcell(
     return MendelCellResults(
         selected_tissue=selected_tissue,
         threshold=threshold,
+        non_selected_threshold=non_selected_threshold,
         gene_symbols=gene_symbols,
         unique_to_tissue=unique_to_tissue,
         unique_cells=unique_cells,
         filtered=filtered,
         ncpm_df=ncpm_df,
+        selective_genes_df=selective_genes_df,
         expression_col=expression_col,
     )
 
@@ -451,6 +633,7 @@ def run_mendelcell_from_files(
     gene_file: str,
     tissue: str,
     threshold: float = 1.0,
+    non_selected_threshold: float | None = None,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis from file paths.
@@ -472,5 +655,5 @@ def run_mendelcell_from_files(
         gene_table=gene_table,
         tissue=tissue,
         threshold=threshold,
+        non_selected_threshold=non_selected_threshold,
     )
-

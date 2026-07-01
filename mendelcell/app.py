@@ -34,11 +34,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Stable layout:
-# - Forces vertical scrollbar to always exist, preventing left-right page jumps
-# - Prevents horizontal overflow
-# - Reduces left/right margins
-# - Keeps the main content at a stable width
 st.markdown(
     """
     <style>
@@ -75,7 +70,7 @@ st.subheader("Candidate gene prioritization by tissue-specific single-cell expre
 
 st.write(
     "MendelCell uses a preprocessed Human Protein Atlas single-cell reference. "
-    "Upload a candidate gene list, enter a tissue, choose an expression threshold, "
+    "Upload a candidate gene list, enter a tissue, choose expression settings, "
     "and generate ranked tables, plots, and a PDF report."
 )
 
@@ -92,8 +87,6 @@ st.warning(
 def show_dataframe_with_1_index(df, height=400, width=1200):
     """
     Display a dataframe in Streamlit with row numbering starting at 1.
-
-    Uses a fixed pixel width to prevent Streamlit layout shaking.
     """
     display_df = df.copy()
     display_df.index = range(1, len(display_df) + 1)
@@ -108,9 +101,6 @@ def show_dataframe_with_1_index(df, height=400, width=1200):
 def show_matplotlib_svg(fig, width=1200):
     """
     Render a matplotlib figure as a fixed-width SVG.
-
-    SVG keeps axis labels sharp and prevents blurry text.
-    The fixed-width wrapper also prevents left-right layout shaking.
     """
     buffer = io.BytesIO()
 
@@ -141,8 +131,6 @@ def show_matplotlib_svg(fig, width=1200):
 def load_reference_data():
     """
     Load preprocessed HPA reference files.
-
-    The reference files are cached after loading.
     """
     if not CLUSTER_REFERENCE.exists():
         raise FileNotFoundError(
@@ -164,9 +152,6 @@ def load_reference_data():
 def load_available_tissues():
     """
     Load available tissues for display on the homepage.
-
-    This only reads the cluster reference file so users can see tissue options
-    before uploading a gene list.
     """
     if not CLUSTER_REFERENCE.exists():
         raise FileNotFoundError(
@@ -180,14 +165,6 @@ def load_available_tissues():
 def read_gene_list(file_name, file_bytes):
     """
     Read uploaded candidate gene list.
-
-    Supported:
-    - .tsv
-    - .txt
-    - .csv
-
-    Required column:
-    - Gene Symbol
     """
     buffer = io.BytesIO(file_bytes)
     file_name_lower = file_name.lower()
@@ -201,8 +178,6 @@ def read_gene_list(file_name, file_bytes):
 def make_genes_passing_threshold_table(results):
     """
     Create a summary table listing each unique gene that passes the threshold.
-
-    Each gene appears once, with the cell types where it passed the threshold.
     """
     expression_col = results.expression_col
 
@@ -246,15 +221,9 @@ def make_genes_passing_threshold_table(results):
     return summary_df
 
 
-def make_top_ncpm_plot(results, top_n=10):
+def make_top_ncpm_plot(results, top_n=10, allowed_genes=None):
     """
     Plot the top cell-gene combinations by average nCPM.
-
-    X-axis:
-    - Cell type + gene combination
-
-    Y-axis:
-    - Average nCPM
     """
     if results.ncpm_df.empty:
         return None, pd.DataFrame()
@@ -270,6 +239,9 @@ def make_top_ncpm_plot(results, top_n=10):
         raise ValueError(f"nCPM table is missing columns: {missing_cols}")
 
     plot_df = results.ncpm_df[required_cols].copy()
+
+    if allowed_genes is not None:
+        plot_df = plot_df[plot_df["Gene name"].isin(allowed_genes)].copy()
 
     plot_df["nCPM"] = pd.to_numeric(plot_df["nCPM"], errors="coerce")
     plot_df = plot_df.dropna(subset=["Gene name", "Cell type", "nCPM"])
@@ -350,10 +322,22 @@ selected_tissue = st.sidebar.text_input(
 )
 
 threshold = st.sidebar.number_input(
-    "Expression threshold",
+    "Selected-cell expression threshold",
     min_value=0.0,
     value=1.0,
     step=0.5,
+)
+
+non_selected_threshold = st.sidebar.number_input(
+    "Maximum allowed expression in other cell types",
+    min_value=0.0,
+    value=float(threshold),
+    step=0.5,
+)
+
+use_selective_genes_for_plot = st.sidebar.checkbox(
+    "Use selective genes for top plot",
+    value=False,
 )
 
 top_n = st.sidebar.number_input(
@@ -548,6 +532,7 @@ try:
             gene_table=gene_table,
             tissue=selected_tissue,
             threshold=threshold,
+            non_selected_threshold=non_selected_threshold,
         )
 
 except Exception as e:
@@ -562,14 +547,16 @@ except Exception as e:
 
 st.success("Analysis complete.")
 
+selective_genes_df = results.selective_genes_df
+
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("Input genes", len(results.gene_symbols))
 col2.metric("Tissue-specific cell types", len(results.unique_cells))
 col3.metric("Genes passing threshold", results.filtered["Gene name"].nunique())
 col4.metric(
-    "Gene-cell pairs",
-    len(results.filtered[["Cell type", "Gene name"]].drop_duplicates()),
+    "Selective genes",
+    len(selective_genes_df["Gene name"].unique()) if not selective_genes_df.empty else 0,
 )
 
 
@@ -587,10 +574,39 @@ else:
     )
 
 
-st.header(f"Top {top_n} cell-gene combinations by average nCPM")
+st.header("Selective genes")
+
+st.write(
+    "These genes pass the selected-cell expression threshold and remain below "
+    "the maximum allowed expression threshold in all other cell types."
+)
+
+if selective_genes_df.empty:
+    st.info("No selective genes were found using the current thresholds.")
+else:
+    show_dataframe_with_1_index(
+        selective_genes_df,
+        height=350,
+        width=1200,
+    )
+
+
+if use_selective_genes_for_plot:
+    allowed_genes = set(selective_genes_df["Gene name"])
+    plot_header = f"Top {top_n} selective cell-gene combinations by average nCPM"
+else:
+    allowed_genes = None
+    plot_header = f"Top {top_n} cell-gene combinations by average nCPM"
+
+
+st.header(plot_header)
 
 try:
-    top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(results, top_n=top_n)
+    top_ncpm_fig, top_ncpm_df = make_top_ncpm_plot(
+        results,
+        top_n=top_n,
+        allowed_genes=allowed_genes,
+    )
 
     if top_ncpm_fig is None or top_ncpm_df.empty:
         st.info(f"No nCPM values available for top-{top_n} plotting.")
@@ -615,13 +631,21 @@ unique_tsv = results.unique_to_tissue.to_csv(sep="\t", index=False)
 filtered_tsv = results.filtered.to_csv(sep="\t", index=False)
 ncpm_tsv = results.ncpm_df.to_csv(sep="\t", index=False)
 
-if "genes_passing_threshold_df" in locals() and not genes_passing_threshold_df.empty:
+if not genes_passing_threshold_df.empty:
     genes_passing_threshold_tsv = genes_passing_threshold_df.to_csv(
         sep="\t",
         index=False,
     )
 else:
     genes_passing_threshold_tsv = ""
+
+if not selective_genes_df.empty:
+    selective_genes_tsv = selective_genes_df.to_csv(
+        sep="\t",
+        index=False,
+    )
+else:
+    selective_genes_tsv = ""
 
 if "top_ncpm_df" in locals() and not top_ncpm_df.empty:
     top_ncpm_tsv = top_ncpm_df.to_csv(sep="\t", index=False)
@@ -657,6 +681,14 @@ if genes_passing_threshold_tsv:
         label="Download genes passing threshold TSV",
         data=genes_passing_threshold_tsv,
         file_name="genes_passing_threshold.tsv",
+        mime="text/tab-separated-values",
+    )
+
+if selective_genes_tsv:
+    st.download_button(
+        label="Download selective genes TSV",
+        data=selective_genes_tsv,
+        file_name="selective_genes.tsv",
         mime="text/tab-separated-values",
     )
 

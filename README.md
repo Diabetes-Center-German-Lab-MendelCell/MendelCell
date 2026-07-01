@@ -111,6 +111,65 @@ immune
 
 This runs the analysis on immune-related cell types across the reference data.
 
+## Validation Examples
+
+MendelCell includes small example gene lists that can be used to check whether the app returns biologically expected results.
+
+### Pancreas Example
+
+File:
+
+```text
+examples/validation_pancreas_genes.tsv
+```
+
+Example genes:
+
+```text
+INS
+GCG
+PDX1
+SST
+```
+
+Expected result: these genes should prioritize pancreatic endocrine or islet-related cell types when the selected tissue is `Pancreas`.
+
+### Immune Cell Example
+
+File:
+
+```text
+examples/validation_immune_genes.tsv
+```
+
+Example genes:
+
+```text
+CD3D
+CD4
+CD8A
+PTPRC
+IL2RA
+CTLA4
+```
+
+Expected result: these genes should prioritize immune-related cell types, especially T-cell-associated cell types, when the selected tissue is `Immune cells`.
+
+### Cell-Line-Oriented Sanity Check
+
+File:
+
+```text
+examples/validation_cell_line_genes.tsv
+```
+
+This gene list includes markers associated with T-cell, monocyte/macrophage, and pancreatic beta-cell contexts.
+
+Expected result: MendelCell should return immune-cell-associated results for immune markers and pancreatic cell-type-associated results for pancreatic endocrine markers when appropriate tissues are selected.
+
+These examples are intended as simple biological sanity checks. They do not establish diagnostic performance and should not be interpreted as clinical validation.
+
+
 ## Output
 
 MendelCell generates:
@@ -135,3 +194,4 @@ Download page: https://www.proteinatlas.org/about/download
 Raw files used:
 - rna_single_cell_cluster.tsv
 - rna_single_cell_type.tsv
+

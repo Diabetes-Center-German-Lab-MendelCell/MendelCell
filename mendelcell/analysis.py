@@ -97,6 +97,7 @@ class MendelCellResults:
     selected_tissue: str
     threshold: float
     non_selected_threshold: float
+    max_non_selected_cell_types: int
     gene_symbols: list[str]
     unique_to_tissue: pd.DataFrame
     unique_cells: list[str]
@@ -282,13 +283,15 @@ def build_selective_genes_df(
     expression_col: str,
     selected_threshold: float,
     non_selected_threshold: float,
+    max_non_selected_cell_types: int = 3,
 ) -> pd.DataFrame:
     """
-    Find genes that are high in selected cell types and low in non-selected cells.
+    Find genes that are high in selected cell types and limited in other cells.
 
     A gene is considered selective if:
     - Max selected-cell expression >= selected_threshold
-    - Max non-selected-cell expression < non_selected_threshold
+    - The number of non-selected cell types with expression >= non_selected_threshold
+      is less than or equal to max_non_selected_cell_types
     """
     output_cols = [
         "Gene name",
@@ -296,6 +299,8 @@ def build_selective_genes_df(
         "Selected cell types passing threshold",
         f"Max selected {expression_col}",
         f"Mean selected {expression_col}",
+        "Number of other cell types above threshold",
+        "Other cell types above threshold",
         f"Max non-selected {expression_col}",
         f"Mean non-selected {expression_col}",
         "Selected/non-selected max ratio",
@@ -380,11 +385,45 @@ def build_selective_genes_df(
         non_selected_stats = pd.DataFrame(
             {
                 "Gene name clean": selected_pass_summary["Gene name clean"],
+                "Number of other cell types above threshold": 0,
+                "Other cell types above threshold": "",
                 f"Max non-selected {expression_col}": 0.0,
                 f"Mean non-selected {expression_col}": 0.0,
             }
         )
+
     else:
+        non_selected_above_threshold = non_selected_expr[
+            non_selected_expr[expression_col] >= non_selected_threshold
+        ].copy()
+
+        if non_selected_above_threshold.empty:
+            non_selected_above_summary = pd.DataFrame(
+                {
+                    "Gene name clean": selected_pass_summary["Gene name clean"],
+                    "Number of other cell types above threshold": 0,
+                    "Other cell types above threshold": "",
+                }
+            )
+
+        else:
+            non_selected_above_summary = (
+                non_selected_above_threshold.groupby("Gene name clean")
+                .agg(
+                    **{
+                        "Number of other cell types above threshold": (
+                            "Cell type",
+                            "nunique",
+                        ),
+                        "Other cell types above threshold": (
+                            "Cell type",
+                            lambda cells: ", ".join(sorted(set(cells))),
+                        ),
+                    }
+                )
+                .reset_index()
+            )
+
         non_selected_stats = (
             non_selected_expr.groupby("Gene name clean")
             .agg(
@@ -394,6 +433,23 @@ def build_selective_genes_df(
                 }
             )
             .reset_index()
+        )
+
+        non_selected_stats = non_selected_stats.merge(
+            non_selected_above_summary,
+            on="Gene name clean",
+            how="left",
+        )
+
+        non_selected_stats["Number of other cell types above threshold"] = (
+            non_selected_stats["Number of other cell types above threshold"]
+            .fillna(0)
+            .astype(int)
+        )
+
+        non_selected_stats["Other cell types above threshold"] = (
+            non_selected_stats["Other cell types above threshold"]
+            .fillna("")
         )
 
     summary_df = selected_pass_summary.merge(
@@ -414,20 +470,33 @@ def build_selective_genes_df(
     mean_non_selected_col = f"Mean non-selected {expression_col}"
     ratio_col = "Selected/non-selected max ratio"
 
+    summary_df["Number of other cell types above threshold"] = (
+        summary_df["Number of other cell types above threshold"]
+        .fillna(0)
+        .astype(int)
+    )
+
+    summary_df["Other cell types above threshold"] = (
+        summary_df["Other cell types above threshold"]
+        .fillna("")
+    )
+
     summary_df[max_non_selected_col] = summary_df[max_non_selected_col].fillna(0.0)
     summary_df[mean_non_selected_col] = summary_df[mean_non_selected_col].fillna(0.0)
 
-    denominator = summary_df[max_non_selected_col].replace(0, pd.NA)
-
-    summary_df[ratio_col] = (
-        summary_df[max_selected_col] / denominator
+    denominator = summary_df[max_non_selected_col].where(
+        summary_df[max_non_selected_col] != 0
     )
 
+    summary_df[ratio_col] = summary_df[max_selected_col] / denominator
     summary_df[ratio_col] = summary_df[ratio_col].fillna(float("inf"))
 
     summary_df = summary_df[
         (summary_df[max_selected_col] >= selected_threshold)
-        & (summary_df[max_non_selected_col] < non_selected_threshold)
+        & (
+            summary_df["Number of other cell types above threshold"]
+            <= max_non_selected_cell_types
+        )
     ].copy()
 
     if summary_df.empty:
@@ -445,8 +514,13 @@ def build_selective_genes_df(
     summary_df = (
         summary_df[output_cols]
         .sort_values(
-            [ratio_col, max_selected_col, "Gene name"],
-            ascending=[False, False, True],
+            [
+                "Number of other cell types above threshold",
+                ratio_col,
+                max_selected_col,
+                "Gene name",
+            ],
+            ascending=[True, False, False, True],
         )
         .reset_index(drop=True)
     )
@@ -465,6 +539,7 @@ def run_mendelcell(
     tissue: str,
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
+    max_non_selected_cell_types: int = 3,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis.
@@ -560,6 +635,7 @@ def run_mendelcell(
         expression_col=expression_col,
         selected_threshold=threshold,
         non_selected_threshold=non_selected_threshold,
+        max_non_selected_cell_types=max_non_selected_cell_types,
     )
 
     # -----------------------------
@@ -617,6 +693,7 @@ def run_mendelcell(
         selected_tissue=selected_tissue,
         threshold=threshold,
         non_selected_threshold=non_selected_threshold,
+        max_non_selected_cell_types=max_non_selected_cell_types,
         gene_symbols=gene_symbols,
         unique_to_tissue=unique_to_tissue,
         unique_cells=unique_cells,
@@ -634,6 +711,7 @@ def run_mendelcell_from_files(
     tissue: str,
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
+    max_non_selected_cell_types: int = 3,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis from file paths.
@@ -656,4 +734,5 @@ def run_mendelcell_from_files(
         tissue=tissue,
         threshold=threshold,
         non_selected_threshold=non_selected_threshold,
+        max_non_selected_cell_types=max_non_selected_cell_types,
     )

@@ -329,15 +329,23 @@ threshold = st.sidebar.number_input(
 )
 
 non_selected_threshold = st.sidebar.number_input(
-    "Maximum allowed expression in other cell types",
+    "Expression threshold for other cell types",
     min_value=0.0,
     value=float(threshold),
     step=0.5,
 )
 
+max_non_selected_cell_types = st.sidebar.number_input(
+    "Maximum number of other cell types allowed above threshold",
+    min_value=0,
+    max_value=50,
+    value=3,
+    step=1,
+)
+
 use_selective_genes_for_plot = st.sidebar.checkbox(
-    "Use selective genes for top plot",
-    value=False,
+    "Plot only selective genes",
+    value=True,
 )
 
 top_n = st.sidebar.number_input(
@@ -533,6 +541,7 @@ try:
             tissue=selected_tissue,
             threshold=threshold,
             non_selected_threshold=non_selected_threshold,
+            max_non_selected_cell_types=max_non_selected_cell_types,
         )
 
 except Exception as e:
@@ -577,8 +586,8 @@ else:
 st.header("Selective genes")
 
 st.write(
-    "These genes pass the selected-cell expression threshold and remain below "
-    "the maximum allowed expression threshold in all other cell types."
+    "These genes pass the selected-cell expression threshold and are allowed "
+    "to be above the other-cell threshold in only a limited number of other cell types."
 )
 
 if selective_genes_df.empty:

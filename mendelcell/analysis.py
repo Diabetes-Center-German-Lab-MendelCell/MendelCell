@@ -161,6 +161,9 @@ class MendelCellResults:
         if self.expression_col in self.filtered.columns:
             cols.append(self.expression_col)
 
+        if "Selected threshold" in self.filtered.columns:
+            cols.append("Selected threshold")
+
         return (
             self.filtered[cols]
             .drop_duplicates()
@@ -273,6 +276,87 @@ def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[st
 
 
 # -----------------------------
+# Threshold helper
+# -----------------------------
+
+def build_gene_max_ncpm_thresholds(
+    clusters: pd.DataFrame,
+    gene_symbols: list[str],
+    selected_tissue: str,
+    selected_cell_types: list[str],
+) -> pd.DataFrame:
+    """
+    Build gene-specific thresholds using the maximum nCPM for each gene
+    within the selected tissue or selected pseudo-tissue.
+
+    For normal tissues:
+    - threshold = max nCPM of that gene in any cell type in the selected tissue
+
+    For Immune cells:
+    - threshold = max nCPM of that gene in any immune-related cell type
+    """
+    output_cols = [
+        "Gene name clean",
+        "Gene name",
+        "Selected threshold",
+    ]
+
+    required_cols = ["Tissue", "Cell type", "Gene name", "Gene name clean", "nCPM"]
+
+    missing_cols = [
+        col for col in required_cols
+        if col not in clusters.columns
+    ]
+
+    if missing_cols:
+        raise ValueError(f"Cluster dataframe is missing columns: {missing_cols}")
+
+    source_df = clusters[required_cols].copy()
+
+    source_df["nCPM"] = pd.to_numeric(source_df["nCPM"], errors="coerce")
+
+    source_df = source_df.dropna(
+        subset=[
+            "Tissue",
+            "Cell type",
+            "Gene name",
+            "Gene name clean",
+            "nCPM",
+        ]
+    )
+
+    source_df = source_df[source_df["Gene name clean"].isin(gene_symbols)].copy()
+
+    if source_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    if selected_tissue == SPECIAL_IMMUNE_TISSUE:
+        source_df = source_df[source_df["Cell type"].isin(selected_cell_types)].copy()
+    else:
+        source_df = source_df[source_df["Tissue"] == selected_tissue].copy()
+
+    if source_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    threshold_df = (
+        source_df.groupby("Gene name clean")
+        .agg(
+            **{
+                "Gene name": ("Gene name", "first"),
+                "Selected threshold": ("nCPM", "max"),
+            }
+        )
+        .reset_index()
+        .sort_values("Gene name")
+        .reset_index(drop=True)
+    )
+
+    threshold_df["Selected threshold"] = threshold_df["Selected threshold"].round(2)
+
+    return threshold_df[output_cols]
+
+
+# -----------------------------
 # Selectivity helper
 # -----------------------------
 
@@ -284,17 +368,19 @@ def build_selective_genes_df(
     selected_threshold: float,
     non_selected_threshold: float,
     max_non_selected_cell_types: int = 3,
+    gene_thresholds_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Find genes that are high in selected cell types and limited in other cells.
 
     A gene is considered selective if:
-    - Max selected-cell expression >= selected_threshold
+    - Max selected-cell expression >= selected_threshold or gene-specific threshold
     - The number of non-selected cell types with expression >= non_selected_threshold
       is less than or equal to max_non_selected_cell_types
     """
     output_cols = [
         "Gene name",
+        "Selected threshold",
         "Number of selected cell types",
         "Selected cell types passing threshold",
         f"Max selected {expression_col}",
@@ -348,8 +434,27 @@ def build_selective_genes_df(
         ~expr_df["Cell type"].isin(selected_cell_types)
     ].copy()
 
+    if gene_thresholds_df is not None and not gene_thresholds_df.empty:
+        threshold_lookup = gene_thresholds_df[
+            ["Gene name clean", "Selected threshold"]
+        ].copy()
+
+        selected_expr = selected_expr.merge(
+            threshold_lookup,
+            on="Gene name clean",
+            how="left",
+        )
+
+        selected_expr["Selected threshold"] = (
+            selected_expr["Selected threshold"]
+            .fillna(selected_threshold)
+        )
+
+    else:
+        selected_expr["Selected threshold"] = selected_threshold
+
     selected_pass = selected_expr[
-        selected_expr[expression_col] >= selected_threshold
+        selected_expr[expression_col] >= selected_expr["Selected threshold"]
     ].copy()
 
     if selected_pass.empty:
@@ -360,6 +465,7 @@ def build_selective_genes_df(
         .agg(
             **{
                 "Gene name": ("Gene name", "first"),
+                "Selected threshold": ("Selected threshold", "first"),
                 "Number of selected cell types": ("Cell type", "nunique"),
                 "Selected cell types passing threshold": (
                     "Cell type",
@@ -492,7 +598,7 @@ def build_selective_genes_df(
     summary_df[ratio_col] = summary_df[ratio_col].fillna(float("inf"))
 
     summary_df = summary_df[
-        (summary_df[max_selected_col] >= selected_threshold)
+        (summary_df[max_selected_col] >= summary_df["Selected threshold"])
         & (
             summary_df["Number of other cell types above threshold"]
             <= max_non_selected_cell_types
@@ -503,6 +609,7 @@ def build_selective_genes_df(
         return pd.DataFrame(columns=output_cols)
 
     for col in [
+        "Selected threshold",
         max_selected_col,
         mean_selected_col,
         max_non_selected_col,
@@ -540,6 +647,7 @@ def run_mendelcell(
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
     max_non_selected_cell_types: int = 3,
+    use_gene_max_ncpm_threshold: bool = False,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis.
@@ -590,14 +698,52 @@ def run_mendelcell(
             )
 
     # -----------------------------
+    # Optional gene-specific max nCPM thresholds
+    # -----------------------------
+
+    if use_gene_max_ncpm_threshold:
+        gene_thresholds_df = build_gene_max_ncpm_thresholds(
+            clusters=clusters,
+            gene_symbols=gene_symbols,
+            selected_tissue=selected_tissue,
+            selected_cell_types=unique_cells,
+        )
+
+    else:
+        gene_thresholds_df = pd.DataFrame(
+            columns=[
+                "Gene name clean",
+                "Gene name",
+                "Selected threshold",
+            ]
+        )
+
+    # -----------------------------
     # Filter HPA cell-type expression
     # -----------------------------
 
-    filtered = hpa[
-        (hpa["Cell type"].isin(unique_cells))
-        & (hpa["Gene name clean"].isin(gene_symbols))
-        & (hpa[expression_col] >= threshold)
-    ].copy()
+    if use_gene_max_ncpm_threshold and not gene_thresholds_df.empty:
+        filtered_source = hpa[
+            (hpa["Cell type"].isin(unique_cells))
+            & (hpa["Gene name clean"].isin(gene_symbols))
+        ].copy()
+
+        filtered_source = filtered_source.merge(
+            gene_thresholds_df[["Gene name clean", "Selected threshold"]],
+            on="Gene name clean",
+            how="left",
+        )
+
+        filtered = filtered_source[
+            filtered_source[expression_col] >= filtered_source["Selected threshold"]
+        ].copy()
+
+    else:
+        filtered = hpa[
+            (hpa["Cell type"].isin(unique_cells))
+            & (hpa["Gene name clean"].isin(gene_symbols))
+            & (hpa[expression_col] >= threshold)
+        ].copy()
 
     if filtered.empty:
         filtered = pd.DataFrame(
@@ -606,6 +752,7 @@ def run_mendelcell(
                 "Gene name clean",
                 "Cell type",
                 expression_col,
+                "Selected threshold",
             ]
         )
 
@@ -616,6 +763,9 @@ def run_mendelcell(
             "Cell type",
             expression_col,
         ]
+
+        if "Selected threshold" in filtered.columns:
+            keep_cols.append("Selected threshold")
 
         filtered = (
             filtered[keep_cols]
@@ -636,6 +786,7 @@ def run_mendelcell(
         selected_threshold=threshold,
         non_selected_threshold=non_selected_threshold,
         max_non_selected_cell_types=max_non_selected_cell_types,
+        gene_thresholds_df=gene_thresholds_df,
     )
 
     # -----------------------------
@@ -712,6 +863,7 @@ def run_mendelcell_from_files(
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
     max_non_selected_cell_types: int = 3,
+    use_gene_max_ncpm_threshold: bool = False,
 ) -> MendelCellResults:
     """
     Run MendelCell analysis from file paths.
@@ -735,4 +887,5 @@ def run_mendelcell_from_files(
         threshold=threshold,
         non_selected_threshold=non_selected_threshold,
         max_non_selected_cell_types=max_non_selected_cell_types,
+        use_gene_max_ncpm_threshold=use_gene_max_ncpm_threshold,
     )

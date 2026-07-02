@@ -189,24 +189,28 @@ def make_genes_passing_threshold_table(results):
                 "Cell types passing threshold",
                 f"Max {expression_col}",
                 f"Mean {expression_col}",
+                "Selected threshold",
             ]
         )
 
     genes_df = results.filtered.copy()
 
+    agg_dict = {
+        "Number of cell types": ("Cell type", "nunique"),
+        "Cell types passing threshold": (
+            "Cell type",
+            lambda cells: ", ".join(sorted(set(cells))),
+        ),
+        f"Max {expression_col}": (expression_col, "max"),
+        f"Mean {expression_col}": (expression_col, "mean"),
+    }
+
+    if "Selected threshold" in genes_df.columns:
+        agg_dict["Selected threshold"] = ("Selected threshold", "first")
+
     summary_df = (
         genes_df.groupby("Gene name")
-        .agg(
-            **{
-                "Number of cell types": ("Cell type", "nunique"),
-                "Cell types passing threshold": (
-                    "Cell type",
-                    lambda cells: ", ".join(sorted(set(cells))),
-                ),
-                f"Max {expression_col}": (expression_col, "max"),
-                f"Mean {expression_col}": (expression_col, "mean"),
-            }
-        )
+        .agg(**agg_dict)
         .reset_index()
         .sort_values(
             [f"Max {expression_col}", "Gene name"],
@@ -217,6 +221,20 @@ def make_genes_passing_threshold_table(results):
 
     summary_df[f"Max {expression_col}"] = summary_df[f"Max {expression_col}"].round(2)
     summary_df[f"Mean {expression_col}"] = summary_df[f"Mean {expression_col}"].round(2)
+
+    if "Selected threshold" in summary_df.columns:
+        summary_df["Selected threshold"] = summary_df["Selected threshold"].round(2)
+
+        ordered_cols = [
+            "Gene name",
+            "Selected threshold",
+            "Number of cell types",
+            "Cell types passing threshold",
+            f"Max {expression_col}",
+            f"Mean {expression_col}",
+        ]
+
+        summary_df = summary_df[ordered_cols]
 
     return summary_df
 
@@ -338,6 +356,17 @@ threshold = st.sidebar.number_input(
     value=1.0,
     step=0.5,
 )
+
+use_gene_max_ncpm_threshold = st.sidebar.checkbox(
+    "Use each gene's max nCPM in selected tissue as threshold",
+    value=False,
+)
+
+if use_gene_max_ncpm_threshold:
+    st.sidebar.caption(
+        "For each gene, the selected-cell threshold is set to that gene's "
+        "maximum nCPM in the selected tissue or selected pseudo-tissue."
+    )
 
 non_selected_threshold = st.sidebar.number_input(
     "Expression threshold for other cell types",
@@ -552,6 +581,7 @@ try:
             threshold=threshold,
             non_selected_threshold=non_selected_threshold,
             max_non_selected_cell_types=max_non_selected_cell_types,
+            use_gene_max_ncpm_threshold=use_gene_max_ncpm_threshold,
         )
 
 except Exception as e:

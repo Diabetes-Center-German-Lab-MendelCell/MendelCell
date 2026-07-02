@@ -364,8 +364,9 @@ use_gene_max_ncpm_threshold = st.sidebar.checkbox(
 
 if use_gene_max_ncpm_threshold:
     st.sidebar.caption(
-        "For each gene, the selected-cell threshold is set to that gene's "
-        "maximum nCPM in the selected tissue or selected pseudo-tissue."
+        "For each gene, MendelCell uses that gene's maximum nCPM in the "
+        "selected tissue as both the selected-cell threshold and the "
+        "other-cell threshold."
     )
 
 non_selected_threshold = st.sidebar.number_input(
@@ -373,7 +374,14 @@ non_selected_threshold = st.sidebar.number_input(
     min_value=0.0,
     value=float(threshold),
     step=0.5,
+    disabled=use_gene_max_ncpm_threshold,
 )
+
+if use_gene_max_ncpm_threshold:
+    st.sidebar.caption(
+        "This fixed other-cell threshold is ignored because gene-specific "
+        "thresholds are being used."
+    )
 
 max_non_selected_cell_types = st.sidebar.number_input(
     "Maximum number of other cell types allowed above threshold",
@@ -624,10 +632,17 @@ else:
 
 st.header("Selective genes")
 
-st.write(
-    "These genes pass the selected-cell expression threshold and are allowed "
-    "to be above the other-cell threshold in only a limited number of other cell types."
-)
+if use_gene_max_ncpm_threshold:
+    st.write(
+        "These genes pass their gene-specific selected-cell threshold and are "
+        "allowed to be above the same gene-specific threshold in only a limited "
+        "number of other cell types."
+    )
+else:
+    st.write(
+        "These genes pass the selected-cell expression threshold and are allowed "
+        "to be above the other-cell threshold in only a limited number of other cell types."
+    )
 
 if selective_genes_df.empty:
     st.info("No selective genes were found using the current thresholds.")

@@ -373,14 +373,13 @@ def build_selective_genes_df(
     """
     Find genes that are high in selected cell types and limited in other cells.
 
-    A gene is considered selective if:
-    - Max selected-cell expression >= selected_threshold or gene-specific threshold
-    - The number of non-selected cell types with expression >= non_selected_threshold
-      is less than or equal to max_non_selected_cell_types
+    If gene_thresholds_df is provided, the gene-specific selected threshold
+    is also used as the other-cell threshold for that gene.
     """
     output_cols = [
         "Gene name",
         "Selected threshold",
+        "Other-cell threshold",
         "Number of selected cell types",
         "Selected cell types passing threshold",
         f"Max selected {expression_col}",
@@ -450,8 +449,20 @@ def build_selective_genes_df(
             .fillna(selected_threshold)
         )
 
+        non_selected_expr = non_selected_expr.merge(
+            threshold_lookup,
+            on="Gene name clean",
+            how="left",
+        )
+
+        non_selected_expr["Other-cell threshold"] = (
+            non_selected_expr["Selected threshold"]
+            .fillna(non_selected_threshold)
+        )
+
     else:
         selected_expr["Selected threshold"] = selected_threshold
+        non_selected_expr["Other-cell threshold"] = non_selected_threshold
 
     selected_pass = selected_expr[
         selected_expr[expression_col] >= selected_expr["Selected threshold"]
@@ -500,7 +511,8 @@ def build_selective_genes_df(
 
     else:
         non_selected_above_threshold = non_selected_expr[
-            non_selected_expr[expression_col] >= non_selected_threshold
+            non_selected_expr[expression_col]
+            >= non_selected_expr["Other-cell threshold"]
         ].copy()
 
         if non_selected_above_threshold.empty:
@@ -570,6 +582,11 @@ def build_selective_genes_df(
         how="left",
     )
 
+    if gene_thresholds_df is not None and not gene_thresholds_df.empty:
+        summary_df["Other-cell threshold"] = summary_df["Selected threshold"]
+    else:
+        summary_df["Other-cell threshold"] = non_selected_threshold
+
     max_selected_col = f"Max selected {expression_col}"
     mean_selected_col = f"Mean selected {expression_col}"
     max_non_selected_col = f"Max non-selected {expression_col}"
@@ -610,6 +627,7 @@ def build_selective_genes_df(
 
     for col in [
         "Selected threshold",
+        "Other-cell threshold",
         max_selected_col,
         mean_selected_col,
         max_non_selected_col,

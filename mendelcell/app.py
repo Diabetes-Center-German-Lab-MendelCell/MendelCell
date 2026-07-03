@@ -189,28 +189,24 @@ def make_genes_passing_threshold_table(results):
                 "Cell types passing threshold",
                 f"Max {expression_col}",
                 f"Mean {expression_col}",
-                "Selected threshold",
             ]
         )
 
     genes_df = results.filtered.copy()
 
-    agg_dict = {
-        "Number of cell types": ("Cell type", "nunique"),
-        "Cell types passing threshold": (
-            "Cell type",
-            lambda cells: ", ".join(sorted(set(cells))),
-        ),
-        f"Max {expression_col}": (expression_col, "max"),
-        f"Mean {expression_col}": (expression_col, "mean"),
-    }
-
-    if "Selected threshold" in genes_df.columns:
-        agg_dict["Selected threshold"] = ("Selected threshold", "first")
-
     summary_df = (
         genes_df.groupby("Gene name")
-        .agg(**agg_dict)
+        .agg(
+            **{
+                "Number of cell types": ("Cell type", "nunique"),
+                "Cell types passing threshold": (
+                    "Cell type",
+                    lambda cells: ", ".join(sorted(set(cells))),
+                ),
+                f"Max {expression_col}": (expression_col, "max"),
+                f"Mean {expression_col}": (expression_col, "mean"),
+            }
+        )
         .reset_index()
         .sort_values(
             [f"Max {expression_col}", "Gene name"],
@@ -221,20 +217,6 @@ def make_genes_passing_threshold_table(results):
 
     summary_df[f"Max {expression_col}"] = summary_df[f"Max {expression_col}"].round(2)
     summary_df[f"Mean {expression_col}"] = summary_df[f"Mean {expression_col}"].round(2)
-
-    if "Selected threshold" in summary_df.columns:
-        summary_df["Selected threshold"] = summary_df["Selected threshold"].round(2)
-
-        ordered_cols = [
-            "Gene name",
-            "Selected threshold",
-            "Number of cell types",
-            "Cell types passing threshold",
-            f"Max {expression_col}",
-            f"Mean {expression_col}",
-        ]
-
-        summary_df = summary_df[ordered_cols]
 
     return summary_df
 
@@ -357,31 +339,12 @@ threshold = st.sidebar.number_input(
     step=0.5,
 )
 
-use_gene_max_ncpm_threshold = st.sidebar.checkbox(
-    "Use each gene's max nCPM in selected tissue as threshold",
-    value=False,
-)
-
-if use_gene_max_ncpm_threshold:
-    st.sidebar.caption(
-        "For each gene, MendelCell uses that gene's maximum nCPM in the "
-        "selected tissue as both the selected-cell threshold and the "
-        "other-cell threshold."
-    )
-
 non_selected_threshold = st.sidebar.number_input(
     "Expression threshold for other cell types",
     min_value=0.0,
     value=float(threshold),
     step=0.5,
-    disabled=use_gene_max_ncpm_threshold,
 )
-
-if use_gene_max_ncpm_threshold:
-    st.sidebar.caption(
-        "This fixed other-cell threshold is ignored because gene-specific "
-        "thresholds are being used."
-    )
 
 max_non_selected_cell_types = st.sidebar.number_input(
     "Maximum number of other cell types allowed above threshold",
@@ -589,7 +552,6 @@ try:
             threshold=threshold,
             non_selected_threshold=non_selected_threshold,
             max_non_selected_cell_types=max_non_selected_cell_types,
-            use_gene_max_ncpm_threshold=use_gene_max_ncpm_threshold,
         )
 
 except Exception as e:
@@ -632,17 +594,10 @@ else:
 
 st.header("Selective genes")
 
-if use_gene_max_ncpm_threshold:
-    st.write(
-        "These genes pass their gene-specific selected-cell threshold and are "
-        "allowed to be above the same gene-specific threshold in only a limited "
-        "number of other cell types."
-    )
-else:
-    st.write(
-        "These genes pass the selected-cell expression threshold and are allowed "
-        "to be above the other-cell threshold in only a limited number of other cell types."
-    )
+st.write(
+    "These genes pass the selected-cell expression threshold and are allowed "
+    "to be above the other-cell threshold in only a limited number of other cell types."
+)
 
 if selective_genes_df.empty:
     st.info("No selective genes were found using the current thresholds.")

@@ -636,18 +636,9 @@ col4.metric(
 )
 
 
-st.header("Genes passing threshold")
-
+# Build this table silently for optional downloads.
+# It is no longer displayed in the app.
 genes_passing_threshold_df = make_genes_passing_threshold_table(results)
-
-if genes_passing_threshold_df.empty:
-    st.info("No genes passed the selected threshold.")
-else:
-    show_dataframe_with_1_index(
-        genes_passing_threshold_df,
-        height=350,
-        width=1200,
-    )
 
 
 st.header("Selective genes")

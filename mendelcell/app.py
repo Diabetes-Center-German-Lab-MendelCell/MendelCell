@@ -2,7 +2,9 @@ from pathlib import Path
 import base64
 import io
 import tempfile
+import textwrap
 
+from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
@@ -119,6 +121,164 @@ def show_matplotlib_svg(fig, width=1200):
         """,
         unsafe_allow_html=True,
     )
+
+
+def wrap_pdf_text(value, width=45):
+    """
+    Wrap long text so it fits better in the selective genes PDF.
+    """
+    if pd.isna(value):
+        return ""
+
+    value = str(value)
+
+    if not value:
+        return ""
+
+    return "\n".join(textwrap.wrap(value, width=width))
+
+
+def create_selective_genes_pdf(
+    selective_genes_df,
+    pdf_path,
+    selected_tissue,
+    max_rows_per_page=18,
+):
+    """
+    Create a PDF version of the Selective genes table.
+    """
+    desired_cols = [
+        "Gene name",
+        "Selected cell types passing threshold",
+        "Number of other cell types above threshold",
+    ]
+
+    display_cols = [
+        col for col in desired_cols
+        if col in selective_genes_df.columns
+    ]
+
+    if not display_cols:
+        display_cols = list(selective_genes_df.columns)
+
+    pdf_df = selective_genes_df[display_cols].copy()
+
+    rename_cols = {
+        "Gene name": "Gene",
+        "Selected cell types passing threshold": "Selected cell types passing threshold",
+        "Number of other cell types above threshold": "Other cell types above threshold",
+    }
+
+    pdf_df = pdf_df.rename(columns=rename_cols)
+
+    for col in pdf_df.columns:
+        if col == "Selected cell types passing threshold":
+            pdf_df[col] = pdf_df[col].apply(lambda x: wrap_pdf_text(x, width=45))
+        else:
+            pdf_df[col] = pdf_df[col].apply(lambda x: "" if pd.isna(x) else str(x))
+
+    with PdfPages(pdf_path) as pdf:
+        if pdf_df.empty:
+            fig, ax = plt.subplots(figsize=(11, 8.5))
+            ax.axis("off")
+
+            ax.text(
+                0.05,
+                0.92,
+                "MendelCell Selective Genes",
+                fontsize=18,
+                weight="bold",
+                transform=ax.transAxes,
+            )
+
+            ax.text(
+                0.05,
+                0.86,
+                f"Selected tissue: {selected_tissue}",
+                fontsize=11,
+                transform=ax.transAxes,
+            )
+
+            ax.text(
+                0.05,
+                0.76,
+                "No selective genes were found using the current thresholds.",
+                fontsize=11,
+                transform=ax.transAxes,
+            )
+
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+            return
+
+        total_rows = len(pdf_df)
+
+        for start in range(0, total_rows, max_rows_per_page):
+            end = start + max_rows_per_page
+            page_df = pdf_df.iloc[start:end].copy()
+
+            fig, ax = plt.subplots(figsize=(11, 8.5))
+            ax.axis("off")
+
+            page_number = (start // max_rows_per_page) + 1
+            total_pages = ((total_rows - 1) // max_rows_per_page) + 1
+
+            ax.text(
+                0.05,
+                0.96,
+                "MendelCell Selective Genes",
+                fontsize=18,
+                weight="bold",
+                transform=ax.transAxes,
+            )
+
+            ax.text(
+                0.05,
+                0.91,
+                f"Selected tissue: {selected_tissue}",
+                fontsize=10,
+                transform=ax.transAxes,
+            )
+
+            ax.text(
+                0.95,
+                0.91,
+                f"Page {page_number} of {total_pages}",
+                fontsize=10,
+                ha="right",
+                transform=ax.transAxes,
+            )
+
+            table = ax.table(
+                cellText=page_df.values,
+                colLabels=page_df.columns,
+                cellLoc="left",
+                colLoc="left",
+                loc="center",
+            )
+
+            table.auto_set_font_size(False)
+            table.set_fontsize(8)
+            table.scale(1, 2.0)
+
+            for (row, col), cell in table.get_celld().items():
+                cell.set_edgecolor("#cccccc")
+
+                if row == 0:
+                    cell.set_text_props(weight="bold")
+                    cell.set_facecolor("#f2f2f2")
+                else:
+                    cell.set_facecolor("white")
+
+            try:
+                table.auto_set_column_width(
+                    col=list(range(len(page_df.columns)))
+                )
+            except Exception:
+                pass
+
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
 
 
 @st.cache_data
@@ -406,7 +566,7 @@ max_non_selected_cell_types = st.sidebar.number_input(
     "Maximum number of other cell types allowed above threshold",
     min_value=0,
     max_value=50,
-    value=10,
+    value=3,
     step=1,
 )
 
@@ -419,7 +579,7 @@ top_n = st.sidebar.number_input(
     "Number of gene-cell type combinations to show",
     min_value=1,
     max_value=100,
-    value=50,
+    value=10,
     step=1,
 )
 
@@ -723,6 +883,27 @@ if not selective_genes_df.empty:
 else:
     selective_genes_tsv = ""
 
+selective_genes_pdf_bytes = b""
+
+if not selective_genes_df.empty:
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            selective_pdf_path = Path(tmpdir) / "selective_genes.pdf"
+
+            create_selective_genes_pdf(
+                selective_genes_df=selective_genes_df,
+                pdf_path=selective_pdf_path,
+                selected_tissue=results.selected_tissue,
+            )
+
+            with open(selective_pdf_path, "rb") as f:
+                selective_genes_pdf_bytes = f.read()
+
+    except Exception as e:
+        st.error("Could not create selective genes PDF.")
+        st.error(str(e))
+
+
 if "top_ncpm_df" in locals() and not top_ncpm_df.empty:
     top_ncpm_tsv = top_ncpm_df.to_csv(sep="\t", index=False)
 else:
@@ -752,20 +933,20 @@ except Exception as e:
     st.error(str(e))
 
 
-if genes_passing_threshold_tsv:
-    st.download_button(
-        label="Download genes passing threshold TSV",
-        data=genes_passing_threshold_tsv,
-        file_name="genes_passing_threshold.tsv",
-        mime="text/tab-separated-values",
-    )
-
 if selective_genes_tsv:
     st.download_button(
         label="Download selective genes TSV",
         data=selective_genes_tsv,
         file_name="selective_genes.tsv",
         mime="text/tab-separated-values",
+    )
+
+if selective_genes_pdf_bytes:
+    st.download_button(
+        label="Download selective genes PDF",
+        data=selective_genes_pdf_bytes,
+        file_name="selective_genes.pdf",
+        mime="application/pdf",
     )
 
 st.download_button(

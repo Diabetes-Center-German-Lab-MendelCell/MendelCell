@@ -712,15 +712,17 @@ def build_selective_genes_df(
         mean_non_selected_col,
         ratio_col,
     ]:
-        summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(2)
+        if col in summary_df.columns:
+            summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(2)
 
-    summary_df["Threshold source tissue count"] = (
-        summary_df["Threshold source tissue count"]
-        .fillna(0)
-        .astype(int)
-    )
+    if "Threshold source tissue count" in summary_df.columns:
+        summary_df["Threshold source tissue count"] = (
+            summary_df["Threshold source tissue count"]
+            .fillna(0)
+            .astype(int)
+        )
 
-    # Sort first while all sorting columns still exist.
+    # Sort first while all sort columns still exist.
     summary_df = (
         summary_df.sort_values(
             [

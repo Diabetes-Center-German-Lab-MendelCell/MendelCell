@@ -167,6 +167,8 @@ def make_genes_passing_threshold_table(results):
         return pd.DataFrame(
             columns=[
                 "Gene name",
+                "Threshold source tissue",
+                "Threshold source cell type",
                 "Threshold source max nCPM",
                 "Selected threshold",
                 "Other-cell threshold",
@@ -190,6 +192,8 @@ def make_genes_passing_threshold_table(results):
     }
 
     for optional_col in [
+        "Threshold source tissue",
+        "Threshold source cell type",
         "Threshold source max nCPM",
         "Selected threshold",
         "Other-cell threshold",
@@ -221,6 +225,8 @@ def make_genes_passing_threshold_table(results):
     ordered_cols = ["Gene name"]
 
     for optional_col in [
+        "Threshold source tissue",
+        "Threshold source cell type",
         "Threshold source max nCPM",
         "Selected threshold",
         "Other-cell threshold",
@@ -357,9 +363,9 @@ use_fraction_max_ncpm_threshold = st.sidebar.checkbox(
 
 if use_fraction_max_ncpm_threshold:
     st.sidebar.caption(
-        "For each gene, MendelCell finds the gene-cell combination with the "
-        "highest nCPM in the selected tissue. It then uses one-third of that "
-        "max nCPM as both the selected-cell threshold and the other-cell threshold."
+        "For each gene, MendelCell finds the exact gene-cell-tissue row with "
+        "the highest nCPM in the selected tissue. It then uses one-third of "
+        "that max nCPM as both the selected-cell threshold and the other-cell threshold."
     )
 
 threshold = st.sidebar.number_input(
@@ -638,7 +644,9 @@ if use_fraction_max_ncpm_threshold:
     st.write(
         "These genes pass a gene-specific threshold equal to one-third of that "
         "gene's maximum nCPM in the selected tissue. Other cell types are also "
-        "evaluated using the same gene-specific one-third max nCPM threshold."
+        "evaluated using the same gene-specific one-third max nCPM threshold. "
+        "The threshold source columns show the exact tissue and cell type that "
+        "produced the maximum nCPM used to calculate the threshold."
     )
 else:
     st.write(

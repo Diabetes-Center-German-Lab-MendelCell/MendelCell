@@ -423,6 +423,7 @@ def build_selective_genes_df(
     output_cols = [
         "Gene name",
         "Threshold source cell type",
+        "Number of other cell types above threshold",
         "Threshold source tissue count",
         "Threshold source tissues",
         "Threshold source mean nCPM",
@@ -432,7 +433,6 @@ def build_selective_genes_df(
         "Selected cell types passing threshold",
         f"Max selected {expression_col}",
         f"Mean selected {expression_col}",
-        "Number of other cell types above threshold",
         "Other cell types above threshold",
         f"Max non-selected {expression_col}",
         f"Mean non-selected {expression_col}",

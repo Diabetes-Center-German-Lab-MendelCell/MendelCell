@@ -89,7 +89,7 @@ class MendelCellResults:
     threshold: float
     non_selected_threshold: float
     max_non_selected_cell_types: int
-    use_fraction_max_ncpm_threshold: bool
+    use_fraction_mean_ncpm_threshold: bool
     threshold_fraction: float
     gene_symbols: list[str]
     unique_to_tissue: pd.DataFrame
@@ -155,9 +155,10 @@ class MendelCellResults:
             cols.append(self.expression_col)
 
         for optional_col in [
-            "Threshold source tissue",
             "Threshold source cell type",
-            "Threshold source max nCPM",
+            "Threshold source tissue count",
+            "Threshold source tissues",
+            "Threshold source mean nCPM",
             "Selected threshold",
             "Other-cell threshold",
         ]:
@@ -276,7 +277,7 @@ def find_immune_cell_types(hpa: pd.DataFrame, clusters: pd.DataFrame) -> list[st
 # Threshold helper
 # -----------------------------
 
-def build_fraction_max_ncpm_thresholds(
+def build_fraction_mean_ncpm_thresholds(
     clusters: pd.DataFrame,
     gene_symbols: list[str],
     selected_tissue: str,
@@ -284,20 +285,24 @@ def build_fraction_max_ncpm_thresholds(
     threshold_fraction: float = 1 / 3,
 ) -> pd.DataFrame:
     """
-    Build gene-specific thresholds using a fraction of the maximum nCPM
-    for each gene in the selected tissue or selected pseudo-tissue.
+    Build gene-specific thresholds using a fraction of the highest
+    selected-cell-type mean nCPM.
 
     For each gene:
-    - Find the exact gene-cell-tissue row with the maximum nCPM.
-    - Selected-cell threshold = max nCPM * threshold_fraction.
-    - Other-cell threshold = max nCPM * threshold_fraction.
+    - Keep selected cell types only.
+    - For each selected cell type, calculate mean nCPM across all tissues
+      where that gene-cell-type combination is expressed.
+    - Choose the selected cell type with the highest mean nCPM.
+    - Selected-cell threshold = highest mean nCPM * threshold_fraction.
+    - Other-cell threshold = highest mean nCPM * threshold_fraction.
     """
     output_cols = [
         "Gene name clean",
         "Gene name",
-        "Threshold source tissue",
         "Threshold source cell type",
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source tissues",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
     ]
@@ -327,22 +332,34 @@ def build_fraction_max_ncpm_thresholds(
     )
 
     source_df = source_df[source_df["Gene name clean"].isin(gene_symbols)].copy()
+    source_df = source_df[source_df["Cell type"].isin(selected_cell_types)].copy()
+
+    # Match the HPA-style mean expression table:
+    # average only across tissues where expression is present.
+    source_df = source_df[source_df["nCPM"] > 0].copy()
 
     if source_df.empty:
         return pd.DataFrame(columns=output_cols)
 
-    if selected_tissue == SPECIAL_IMMUNE_TISSUE:
-        source_df = source_df[source_df["Cell type"].isin(selected_cell_types)].copy()
-    else:
-        source_df = source_df[source_df["Tissue"] == selected_tissue].copy()
+    cell_mean_df = (
+        source_df.groupby(["Gene name clean", "Cell type"])
+        .agg(
+            **{
+                "Gene name": ("Gene name", "first"),
+                "Threshold source mean nCPM": ("nCPM", "mean"),
+                "Threshold source tissue count": ("Tissue", "nunique"),
+                "Threshold source tissues": (
+                    "Tissue",
+                    lambda tissues: ", ".join(sorted(set(tissues))),
+                ),
+            }
+        )
+        .reset_index()
+    )
 
-    if source_df.empty:
-        return pd.DataFrame(columns=output_cols)
-
-    # Keep the actual row that produced the maximum nCPM for each gene.
     threshold_df = (
-        source_df.sort_values(
-            ["Gene name clean", "nCPM"],
+        cell_mean_df.sort_values(
+            ["Gene name clean", "Threshold source mean nCPM"],
             ascending=[True, False],
         )
         .drop_duplicates(subset=["Gene name clean"], keep="first")
@@ -351,22 +368,20 @@ def build_fraction_max_ncpm_thresholds(
 
     threshold_df = threshold_df.rename(
         columns={
-            "Tissue": "Threshold source tissue",
             "Cell type": "Threshold source cell type",
-            "nCPM": "Threshold source max nCPM",
         }
     )
 
     threshold_df["Selected threshold"] = (
-        threshold_df["Threshold source max nCPM"] * threshold_fraction
+        threshold_df["Threshold source mean nCPM"] * threshold_fraction
     )
 
     threshold_df["Other-cell threshold"] = (
-        threshold_df["Threshold source max nCPM"] * threshold_fraction
+        threshold_df["Threshold source mean nCPM"] * threshold_fraction
     )
 
     for col in [
-        "Threshold source max nCPM",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
     ]:
@@ -407,9 +422,10 @@ def build_selective_genes_df(
     """
     output_cols = [
         "Gene name",
-        "Threshold source tissue",
         "Threshold source cell type",
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source tissues",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
         "Number of selected cell types",
@@ -469,9 +485,10 @@ def build_selective_genes_df(
         threshold_lookup = gene_thresholds_df[
             [
                 "Gene name clean",
-                "Threshold source tissue",
                 "Threshold source cell type",
-                "Threshold source max nCPM",
+                "Threshold source tissue count",
+                "Threshold source tissues",
+                "Threshold source mean nCPM",
                 "Selected threshold",
                 "Other-cell threshold",
             ]
@@ -510,15 +527,17 @@ def build_selective_genes_df(
         )
 
     else:
-        selected_expr["Threshold source tissue"] = ""
         selected_expr["Threshold source cell type"] = ""
-        selected_expr["Threshold source max nCPM"] = pd.NA
+        selected_expr["Threshold source tissue count"] = pd.NA
+        selected_expr["Threshold source tissues"] = ""
+        selected_expr["Threshold source mean nCPM"] = pd.NA
         selected_expr["Selected threshold"] = selected_threshold
         selected_expr["Other-cell threshold"] = non_selected_threshold
 
-        non_selected_expr["Threshold source tissue"] = ""
         non_selected_expr["Threshold source cell type"] = ""
-        non_selected_expr["Threshold source max nCPM"] = pd.NA
+        non_selected_expr["Threshold source tissue count"] = pd.NA
+        non_selected_expr["Threshold source tissues"] = ""
+        non_selected_expr["Threshold source mean nCPM"] = pd.NA
         non_selected_expr["Selected threshold"] = selected_threshold
         non_selected_expr["Other-cell threshold"] = non_selected_threshold
 
@@ -534,13 +553,20 @@ def build_selective_genes_df(
         .agg(
             **{
                 "Gene name": ("Gene name", "first"),
-                "Threshold source tissue": ("Threshold source tissue", "first"),
                 "Threshold source cell type": (
                     "Threshold source cell type",
                     "first",
                 ),
-                "Threshold source max nCPM": (
-                    "Threshold source max nCPM",
+                "Threshold source tissue count": (
+                    "Threshold source tissue count",
+                    "first",
+                ),
+                "Threshold source tissues": (
+                    "Threshold source tissues",
+                    "first",
+                ),
+                "Threshold source mean nCPM": (
+                    "Threshold source mean nCPM",
                     "first",
                 ),
                 "Selected threshold": ("Selected threshold", "first"),
@@ -689,7 +715,8 @@ def build_selective_genes_df(
         return pd.DataFrame(columns=output_cols)
 
     for col in [
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
         max_selected_col,
@@ -699,6 +726,12 @@ def build_selective_genes_df(
         ratio_col,
     ]:
         summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(2)
+
+    summary_df["Threshold source tissue count"] = (
+        summary_df["Threshold source tissue count"]
+        .fillna(0)
+        .astype(int)
+    )
 
     summary_df = (
         summary_df[output_cols]
@@ -729,7 +762,7 @@ def run_mendelcell(
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
     max_non_selected_cell_types: int = 3,
-    use_fraction_max_ncpm_threshold: bool = False,
+    use_fraction_mean_ncpm_threshold: bool = False,
     threshold_fraction: float = 1 / 3,
 ) -> MendelCellResults:
     """
@@ -781,11 +814,11 @@ def run_mendelcell(
             )
 
     # -----------------------------
-    # Optional 1/3 max nCPM thresholds
+    # Optional 1/3 mean nCPM thresholds
     # -----------------------------
 
-    if use_fraction_max_ncpm_threshold:
-        gene_thresholds_df = build_fraction_max_ncpm_thresholds(
+    if use_fraction_mean_ncpm_threshold:
+        gene_thresholds_df = build_fraction_mean_ncpm_thresholds(
             clusters=clusters,
             gene_symbols=gene_symbols,
             selected_tissue=selected_tissue,
@@ -798,9 +831,10 @@ def run_mendelcell(
             columns=[
                 "Gene name clean",
                 "Gene name",
-                "Threshold source tissue",
                 "Threshold source cell type",
-                "Threshold source max nCPM",
+                "Threshold source tissue count",
+                "Threshold source tissues",
+                "Threshold source mean nCPM",
                 "Selected threshold",
                 "Other-cell threshold",
             ]
@@ -810,7 +844,7 @@ def run_mendelcell(
     # Filter HPA cell-type expression
     # -----------------------------
 
-    if use_fraction_max_ncpm_threshold and not gene_thresholds_df.empty:
+    if use_fraction_mean_ncpm_threshold and not gene_thresholds_df.empty:
         filtered_source = hpa[
             (hpa["Cell type"].isin(unique_cells))
             & (hpa["Gene name clean"].isin(gene_symbols))
@@ -820,9 +854,10 @@ def run_mendelcell(
             gene_thresholds_df[
                 [
                     "Gene name clean",
-                    "Threshold source tissue",
                     "Threshold source cell type",
-                    "Threshold source max nCPM",
+                    "Threshold source tissue count",
+                    "Threshold source tissues",
+                    "Threshold source mean nCPM",
                     "Selected threshold",
                     "Other-cell threshold",
                 ]
@@ -849,9 +884,10 @@ def run_mendelcell(
                 "Gene name clean",
                 "Cell type",
                 expression_col,
-                "Threshold source tissue",
                 "Threshold source cell type",
-                "Threshold source max nCPM",
+                "Threshold source tissue count",
+                "Threshold source tissues",
+                "Threshold source mean nCPM",
                 "Selected threshold",
                 "Other-cell threshold",
             ]
@@ -866,9 +902,10 @@ def run_mendelcell(
         ]
 
         for optional_col in [
-            "Threshold source tissue",
             "Threshold source cell type",
-            "Threshold source max nCPM",
+            "Threshold source tissue count",
+            "Threshold source tissues",
+            "Threshold source mean nCPM",
             "Selected threshold",
             "Other-cell threshold",
         ]:
@@ -953,7 +990,7 @@ def run_mendelcell(
         threshold=threshold,
         non_selected_threshold=non_selected_threshold,
         max_non_selected_cell_types=max_non_selected_cell_types,
-        use_fraction_max_ncpm_threshold=use_fraction_max_ncpm_threshold,
+        use_fraction_mean_ncpm_threshold=use_fraction_mean_ncpm_threshold,
         threshold_fraction=threshold_fraction,
         gene_symbols=gene_symbols,
         unique_to_tissue=unique_to_tissue,
@@ -973,7 +1010,7 @@ def run_mendelcell_from_files(
     threshold: float = 1.0,
     non_selected_threshold: float | None = None,
     max_non_selected_cell_types: int = 3,
-    use_fraction_max_ncpm_threshold: bool = False,
+    use_fraction_mean_ncpm_threshold: bool = False,
     threshold_fraction: float = 1 / 3,
 ) -> MendelCellResults:
     """
@@ -996,6 +1033,6 @@ def run_mendelcell_from_files(
         threshold=threshold,
         non_selected_threshold=non_selected_threshold,
         max_non_selected_cell_types=max_non_selected_cell_types,
-        use_fraction_max_ncpm_threshold=use_fraction_max_ncpm_threshold,
+        use_fraction_mean_ncpm_threshold=use_fraction_mean_ncpm_threshold,
         threshold_fraction=threshold_fraction,
     )

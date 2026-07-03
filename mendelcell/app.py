@@ -167,9 +167,10 @@ def make_genes_passing_threshold_table(results):
         return pd.DataFrame(
             columns=[
                 "Gene name",
-                "Threshold source tissue",
                 "Threshold source cell type",
-                "Threshold source max nCPM",
+                "Threshold source tissue count",
+                "Threshold source tissues",
+                "Threshold source mean nCPM",
                 "Selected threshold",
                 "Other-cell threshold",
                 "Number of cell types",
@@ -192,9 +193,10 @@ def make_genes_passing_threshold_table(results):
     }
 
     for optional_col in [
-        "Threshold source tissue",
         "Threshold source cell type",
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source tissues",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
     ]:
@@ -213,7 +215,8 @@ def make_genes_passing_threshold_table(results):
     )
 
     for col in [
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
         f"Max {expression_col}",
@@ -222,12 +225,20 @@ def make_genes_passing_threshold_table(results):
         if col in summary_df.columns:
             summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(2)
 
+    if "Threshold source tissue count" in summary_df.columns:
+        summary_df["Threshold source tissue count"] = (
+            summary_df["Threshold source tissue count"]
+            .fillna(0)
+            .astype(int)
+        )
+
     ordered_cols = ["Gene name"]
 
     for optional_col in [
-        "Threshold source tissue",
         "Threshold source cell type",
-        "Threshold source max nCPM",
+        "Threshold source tissue count",
+        "Threshold source tissues",
+        "Threshold source mean nCPM",
         "Selected threshold",
         "Other-cell threshold",
     ]:
@@ -356,16 +367,17 @@ selected_tissue = st.sidebar.selectbox(
     index=default_tissue_index,
 )
 
-use_fraction_max_ncpm_threshold = st.sidebar.checkbox(
-    "Use 1/3 of each gene's max nCPM in selected tissue as thresholds",
+use_fraction_mean_ncpm_threshold = st.sidebar.checkbox(
+    "Use 1/3 of each gene's highest selected cell-type mean nCPM as thresholds",
     value=False,
 )
 
-if use_fraction_max_ncpm_threshold:
+if use_fraction_mean_ncpm_threshold:
     st.sidebar.caption(
-        "For each gene, MendelCell finds the exact gene-cell-tissue row with "
-        "the highest nCPM in the selected tissue. It then uses one-third of "
-        "that max nCPM as both the selected-cell threshold and the other-cell threshold."
+        "For each gene, MendelCell calculates mean nCPM for each selected cell "
+        "type across all tissues where that gene-cell-type combination is expressed. "
+        "It then uses one-third of the highest selected cell-type mean nCPM as both "
+        "the selected-cell threshold and the other-cell threshold."
     )
 
 threshold = st.sidebar.number_input(
@@ -373,7 +385,7 @@ threshold = st.sidebar.number_input(
     min_value=0.0,
     value=1.0,
     step=0.5,
-    disabled=use_fraction_max_ncpm_threshold,
+    disabled=use_fraction_mean_ncpm_threshold,
 )
 
 non_selected_threshold = st.sidebar.number_input(
@@ -381,13 +393,13 @@ non_selected_threshold = st.sidebar.number_input(
     min_value=0.0,
     value=float(threshold),
     step=0.5,
-    disabled=use_fraction_max_ncpm_threshold,
+    disabled=use_fraction_mean_ncpm_threshold,
 )
 
-if use_fraction_max_ncpm_threshold:
+if use_fraction_mean_ncpm_threshold:
     st.sidebar.caption(
         "The two fixed threshold inputs above are disabled because gene-specific "
-        "one-third max nCPM thresholds are being used."
+        "one-third mean nCPM thresholds are being used."
     )
 
 max_non_selected_cell_types = st.sidebar.number_input(
@@ -596,7 +608,7 @@ try:
             threshold=threshold,
             non_selected_threshold=non_selected_threshold,
             max_non_selected_cell_types=max_non_selected_cell_types,
-            use_fraction_max_ncpm_threshold=use_fraction_max_ncpm_threshold,
+            use_fraction_mean_ncpm_threshold=use_fraction_mean_ncpm_threshold,
             threshold_fraction=1 / 3,
         )
 
@@ -640,13 +652,13 @@ else:
 
 st.header("Selective genes")
 
-if use_fraction_max_ncpm_threshold:
+if use_fraction_mean_ncpm_threshold:
     st.write(
-        "These genes pass a gene-specific threshold equal to one-third of that "
-        "gene's maximum nCPM in the selected tissue. Other cell types are also "
-        "evaluated using the same gene-specific one-third max nCPM threshold. "
-        "The threshold source columns show the exact tissue and cell type that "
-        "produced the maximum nCPM used to calculate the threshold."
+        "These genes pass a gene-specific threshold equal to one-third of the "
+        "highest selected cell-type mean nCPM. For each selected cell type, "
+        "mean nCPM is calculated across tissues where the gene-cell-type "
+        "combination is expressed. Other cell types are evaluated using the "
+        "same gene-specific threshold."
     )
 else:
     st.write(

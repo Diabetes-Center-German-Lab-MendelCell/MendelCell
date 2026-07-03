@@ -566,7 +566,7 @@ max_non_selected_cell_types = st.sidebar.number_input(
     "Maximum number of other cell types allowed above threshold",
     min_value=0,
     max_value=50,
-    value=3,
+    value=10,
     step=1,
 )
 
@@ -579,7 +579,7 @@ top_n = st.sidebar.number_input(
     "Number of gene-cell type combinations to show",
     min_value=1,
     max_value=100,
-    value=10,
+    value=50,
     step=1,
 )
 

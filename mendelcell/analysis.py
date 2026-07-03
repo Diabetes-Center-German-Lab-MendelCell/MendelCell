@@ -423,7 +423,7 @@ def build_selective_genes_df(
     output_cols = [
         "Gene name",
         "Selected cell types passing threshold",
-        "Number of other cell types above threshold"
+        "Number of other cell types above threshold",
     ]
 
     if hpa.empty:
@@ -720,9 +720,9 @@ def build_selective_genes_df(
         .astype(int)
     )
 
+    # Sort first while all sorting columns still exist.
     summary_df = (
-        summary_df[output_cols]
-        .sort_values(
+        summary_df.sort_values(
             [
                 "Number of other cell types above threshold",
                 ratio_col,
@@ -733,6 +733,9 @@ def build_selective_genes_df(
         )
         .reset_index(drop=True)
     )
+
+    # Then keep only the display columns.
+    summary_df = summary_df[output_cols]
 
     return summary_df
 

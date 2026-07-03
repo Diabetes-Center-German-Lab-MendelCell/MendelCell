@@ -85,9 +85,6 @@ st.warning(
 # -----------------------------
 
 def show_dataframe_with_1_index(df, height=400, width=1200):
-    """
-    Display a dataframe in Streamlit with row numbering starting at 1.
-    """
     display_df = df.copy()
     display_df.index = range(1, len(display_df) + 1)
 
@@ -99,9 +96,6 @@ def show_dataframe_with_1_index(df, height=400, width=1200):
 
 
 def show_matplotlib_svg(fig, width=1200):
-    """
-    Render a matplotlib figure as a fixed-width SVG.
-    """
     buffer = io.BytesIO()
 
     fig.savefig(
@@ -129,9 +123,6 @@ def show_matplotlib_svg(fig, width=1200):
 
 @st.cache_data
 def load_reference_data():
-    """
-    Load preprocessed HPA reference files.
-    """
     if not CLUSTER_REFERENCE.exists():
         raise FileNotFoundError(
             f"Missing cluster reference file: {CLUSTER_REFERENCE}"
@@ -150,9 +141,6 @@ def load_reference_data():
 
 @st.cache_data
 def load_available_tissues():
-    """
-    Load available tissues for display on the homepage and sidebar.
-    """
     if not CLUSTER_REFERENCE.exists():
         raise FileNotFoundError(
             f"Missing cluster reference file: {CLUSTER_REFERENCE}"
@@ -163,9 +151,6 @@ def load_available_tissues():
 
 
 def read_gene_list(file_name, file_bytes):
-    """
-    Read uploaded candidate gene list.
-    """
     buffer = io.BytesIO(file_bytes)
     file_name_lower = file_name.lower()
 
@@ -176,15 +161,15 @@ def read_gene_list(file_name, file_bytes):
 
 
 def make_genes_passing_threshold_table(results):
-    """
-    Create a summary table listing each unique gene that passes the threshold.
-    """
     expression_col = results.expression_col
 
     if results.filtered.empty:
         return pd.DataFrame(
             columns=[
                 "Gene name",
+                "Threshold source max nCPM",
+                "Selected threshold",
+                "Other-cell threshold",
                 "Number of cell types",
                 "Cell types passing threshold",
                 f"Max {expression_col}",
@@ -194,19 +179,27 @@ def make_genes_passing_threshold_table(results):
 
     genes_df = results.filtered.copy()
 
+    agg_dict = {
+        "Number of cell types": ("Cell type", "nunique"),
+        "Cell types passing threshold": (
+            "Cell type",
+            lambda cells: ", ".join(sorted(set(cells))),
+        ),
+        f"Max {expression_col}": (expression_col, "max"),
+        f"Mean {expression_col}": (expression_col, "mean"),
+    }
+
+    for optional_col in [
+        "Threshold source max nCPM",
+        "Selected threshold",
+        "Other-cell threshold",
+    ]:
+        if optional_col in genes_df.columns:
+            agg_dict[optional_col] = (optional_col, "first")
+
     summary_df = (
         genes_df.groupby("Gene name")
-        .agg(
-            **{
-                "Number of cell types": ("Cell type", "nunique"),
-                "Cell types passing threshold": (
-                    "Cell type",
-                    lambda cells: ", ".join(sorted(set(cells))),
-                ),
-                f"Max {expression_col}": (expression_col, "max"),
-                f"Mean {expression_col}": (expression_col, "mean"),
-            }
-        )
+        .agg(**agg_dict)
         .reset_index()
         .sort_values(
             [f"Max {expression_col}", "Gene name"],
@@ -215,16 +208,41 @@ def make_genes_passing_threshold_table(results):
         .reset_index(drop=True)
     )
 
-    summary_df[f"Max {expression_col}"] = summary_df[f"Max {expression_col}"].round(2)
-    summary_df[f"Mean {expression_col}"] = summary_df[f"Mean {expression_col}"].round(2)
+    for col in [
+        "Threshold source max nCPM",
+        "Selected threshold",
+        "Other-cell threshold",
+        f"Max {expression_col}",
+        f"Mean {expression_col}",
+    ]:
+        if col in summary_df.columns:
+            summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(2)
+
+    ordered_cols = ["Gene name"]
+
+    for optional_col in [
+        "Threshold source max nCPM",
+        "Selected threshold",
+        "Other-cell threshold",
+    ]:
+        if optional_col in summary_df.columns:
+            ordered_cols.append(optional_col)
+
+    ordered_cols.extend(
+        [
+            "Number of cell types",
+            "Cell types passing threshold",
+            f"Max {expression_col}",
+            f"Mean {expression_col}",
+        ]
+    )
+
+    summary_df = summary_df[ordered_cols]
 
     return summary_df
 
 
 def make_top_ncpm_plot(results, top_n=10, allowed_genes=None):
-    """
-    Plot the top cell-gene combinations by average nCPM.
-    """
     if results.ncpm_df.empty:
         return None, pd.DataFrame()
 
@@ -332,11 +350,24 @@ selected_tissue = st.sidebar.selectbox(
     index=default_tissue_index,
 )
 
+use_fraction_max_ncpm_threshold = st.sidebar.checkbox(
+    "Use 1/3 of each gene's max nCPM in selected tissue as thresholds",
+    value=False,
+)
+
+if use_fraction_max_ncpm_threshold:
+    st.sidebar.caption(
+        "For each gene, MendelCell finds the gene-cell combination with the "
+        "highest nCPM in the selected tissue. It then uses one-third of that "
+        "max nCPM as both the selected-cell threshold and the other-cell threshold."
+    )
+
 threshold = st.sidebar.number_input(
     "Selected-cell expression threshold",
     min_value=0.0,
     value=1.0,
     step=0.5,
+    disabled=use_fraction_max_ncpm_threshold,
 )
 
 non_selected_threshold = st.sidebar.number_input(
@@ -344,7 +375,14 @@ non_selected_threshold = st.sidebar.number_input(
     min_value=0.0,
     value=float(threshold),
     step=0.5,
+    disabled=use_fraction_max_ncpm_threshold,
 )
+
+if use_fraction_max_ncpm_threshold:
+    st.sidebar.caption(
+        "The two fixed threshold inputs above are disabled because gene-specific "
+        "one-third max nCPM thresholds are being used."
+    )
 
 max_non_selected_cell_types = st.sidebar.number_input(
     "Maximum number of other cell types allowed above threshold",
@@ -515,7 +553,7 @@ with st.expander("Preview gene list"):
 # -----------------------------
 
 if not run_button:
-    st.info("Choose a tissue and threshold, then click **Run MendelCell analysis**.")
+    st.info("Choose a tissue and settings, then click **Run MendelCell analysis**.")
     st.stop()
 
 
@@ -552,6 +590,8 @@ try:
             threshold=threshold,
             non_selected_threshold=non_selected_threshold,
             max_non_selected_cell_types=max_non_selected_cell_types,
+            use_fraction_max_ncpm_threshold=use_fraction_max_ncpm_threshold,
+            threshold_fraction=1 / 3,
         )
 
 except Exception as e:
@@ -594,10 +634,17 @@ else:
 
 st.header("Selective genes")
 
-st.write(
-    "These genes pass the selected-cell expression threshold and are allowed "
-    "to be above the other-cell threshold in only a limited number of other cell types."
-)
+if use_fraction_max_ncpm_threshold:
+    st.write(
+        "These genes pass a gene-specific threshold equal to one-third of that "
+        "gene's maximum nCPM in the selected tissue. Other cell types are also "
+        "evaluated using the same gene-specific one-third max nCPM threshold."
+    )
+else:
+    st.write(
+        "These genes pass the selected-cell expression threshold and are allowed "
+        "to be above the other-cell threshold in only a limited number of other cell types."
+    )
 
 if selective_genes_df.empty:
     st.info("No selective genes were found using the current thresholds.")

@@ -528,7 +528,7 @@ selected_tissue = st.sidebar.selectbox(
 )
 
 use_fraction_mean_ncpm_threshold = st.sidebar.checkbox(
-    "Use 1/3 of each gene's highest selected cell-type mean nCPM as thresholds",
+    "Max cell filter",
     value=False,
 )
 

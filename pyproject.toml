@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-  {name = "Chester Chamberlain"}
+  {name = "Landon Chamberlain"}
 ]
 dependencies = [
   "pandas>=1.5",

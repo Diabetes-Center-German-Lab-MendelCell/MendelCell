@@ -1,6 +1,5 @@
 from pathlib import Path
 from datetime import datetime, timezone
-import os
 import base64
 import io
 import tempfile
@@ -27,16 +26,6 @@ CLUSTER_REFERENCE = DATA_DIR / "mendelcell_clusters_reference.parquet"
 CELLTYPE_REFERENCE = DATA_DIR / "mendelcell_celltype_reference.parquet"
 EXAMPLE_GENE_LIST = EXAMPLES_DIR / "example_gene_list.tsv"
 AVAILABLE_TISSUES_FILE = DATA_DIR / "tissues.txt"
-
-# Defaults to <repository>/logs. On the UCSF VM, this can be overridden
-# with MENDELCELL_LOG_DIR and mounted to persistent storage.
-LOG_DIR = Path(
-    os.getenv(
-        "MENDELCELL_LOG_DIR",
-        str(ROOT_DIR / "logs"),
-    )
-)
-REFERENCE_STATUS_LOG = LOG_DIR / "reference_file_status.log"
 
 
 # -----------------------------
@@ -96,16 +85,16 @@ st.warning(
 
 
 # -----------------------------
-# Reference-file status logging
+# Reference-file status in container log
 # -----------------------------
 
 @st.cache_resource(show_spinner=False)
-def write_reference_file_status_log():
+def log_reference_file_status():
     """
-    Write one reference-file status entry per Streamlit process.
+    Print one reference-file status entry per Streamlit process.
 
     Streamlit reruns app.py during user interaction, so cache_resource prevents
-    duplicate log entries during ordinary page reruns.
+    duplicate entries during ordinary page reruns.
     """
     files_to_check = [
         ("Cluster reference", CLUSTER_REFERENCE),
@@ -118,7 +107,7 @@ def write_reference_file_status_log():
 
     lines = [
         "=" * 72,
-        f"MendelCell reference-file status",
+        "MendelCell reference-file status",
         f"Timestamp (UTC): {timestamp}",
         f"Application root: {ROOT_DIR}",
         f"Data directory: {DATA_DIR}",
@@ -156,30 +145,17 @@ def write_reference_file_status_log():
         if all_files_found
         else "Overall status: ONE OR MORE FILES MISSING"
     )
-    lines.append("")
+    lines.append("=" * 72)
 
-    try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+    status_text = "\n".join(lines)
 
-        with REFERENCE_STATUS_LOG.open("a", encoding="utf-8") as log_file:
-            log_file.write("\n".join(lines))
+    # This appears in the Hugging Face Container logs.
+    print(status_text, flush=True)
 
-        print(
-            f"Reference-file status written to {REFERENCE_STATUS_LOG}",
-            flush=True,
-        )
-
-    except OSError as error:
-        # Logging failure should not prevent MendelCell from starting.
-        print(
-            f"Could not write reference-file status log: {error}",
-            flush=True,
-        )
-
-    return str(REFERENCE_STATUS_LOG)
+    return all_files_found
 
 
-write_reference_file_status_log()
+log_reference_file_status()
 
 
 # -----------------------------

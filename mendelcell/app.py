@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime, timezone
+import os
 import base64
 import io
 import tempfile
@@ -25,6 +27,16 @@ CLUSTER_REFERENCE = DATA_DIR / "mendelcell_clusters_reference.parquet"
 CELLTYPE_REFERENCE = DATA_DIR / "mendelcell_celltype_reference.parquet"
 EXAMPLE_GENE_LIST = EXAMPLES_DIR / "example_gene_list.tsv"
 AVAILABLE_TISSUES_FILE = DATA_DIR / "tissues.txt"
+
+# Defaults to <repository>/logs. On the UCSF VM, this can be overridden
+# with MENDELCELL_LOG_DIR and mounted to persistent storage.
+LOG_DIR = Path(
+    os.getenv(
+        "MENDELCELL_LOG_DIR",
+        str(ROOT_DIR / "logs"),
+    )
+)
+REFERENCE_STATUS_LOG = LOG_DIR / "reference_file_status.log"
 
 
 # -----------------------------
@@ -81,6 +93,93 @@ st.warning(
     "MendelCell is intended for research and exploratory analysis only. "
     "It is not a diagnostic tool and should not be used to make clinical decisions."
 )
+
+
+# -----------------------------
+# Reference-file status logging
+# -----------------------------
+
+@st.cache_resource(show_spinner=False)
+def write_reference_file_status_log():
+    """
+    Write one reference-file status entry per Streamlit process.
+
+    Streamlit reruns app.py during user interaction, so cache_resource prevents
+    duplicate log entries during ordinary page reruns.
+    """
+    files_to_check = [
+        ("Cluster reference", CLUSTER_REFERENCE),
+        ("Cell-type reference", CELLTYPE_REFERENCE),
+        ("Example gene list", EXAMPLE_GENE_LIST),
+        ("Tissue list", AVAILABLE_TISSUES_FILE),
+    ]
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    lines = [
+        "=" * 72,
+        f"MendelCell reference-file status",
+        f"Timestamp (UTC): {timestamp}",
+        f"Application root: {ROOT_DIR}",
+        f"Data directory: {DATA_DIR}",
+        "",
+    ]
+
+    all_files_found = True
+
+    for label, path in files_to_check:
+        if path.exists():
+            size_bytes = path.stat().st_size
+            size_mb = size_bytes / 1_000_000
+
+            lines.extend(
+                [
+                    f"{label}: FOUND",
+                    f"Path: {path}",
+                    f"Size: {size_bytes:,} bytes ({size_mb:.2f} MB)",
+                    "",
+                ]
+            )
+        else:
+            all_files_found = False
+
+            lines.extend(
+                [
+                    f"{label}: MISSING",
+                    f"Path: {path}",
+                    "",
+                ]
+            )
+
+    lines.append(
+        "Overall status: READY"
+        if all_files_found
+        else "Overall status: ONE OR MORE FILES MISSING"
+    )
+    lines.append("")
+
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+        with REFERENCE_STATUS_LOG.open("a", encoding="utf-8") as log_file:
+            log_file.write("\n".join(lines))
+
+        print(
+            f"Reference-file status written to {REFERENCE_STATUS_LOG}",
+            flush=True,
+        )
+
+    except OSError as error:
+        # Logging failure should not prevent MendelCell from starting.
+        print(
+            f"Could not write reference-file status log: {error}",
+            flush=True,
+        )
+
+    return str(REFERENCE_STATUS_LOG)
+
+
+write_reference_file_status_log()
 
 
 # -----------------------------
@@ -605,48 +704,6 @@ top_n = st.sidebar.number_input(
 )
 
 run_button = st.sidebar.button("Run MendelCell analysis")
-
-
-# -----------------------------
-# Reference file status
-# -----------------------------
-
-with st.expander("Reference file status"):
-    st.write("Expected reference files:")
-
-    st.code(str(CLUSTER_REFERENCE))
-
-    if CLUSTER_REFERENCE.exists():
-        st.success(
-            f"Cluster reference found "
-            f"({CLUSTER_REFERENCE.stat().st_size / 1_000_000:.2f} MB)"
-        )
-    else:
-        st.error("Cluster reference file is missing.")
-
-    st.code(str(CELLTYPE_REFERENCE))
-
-    if CELLTYPE_REFERENCE.exists():
-        st.success(
-            f"Cell-type reference found "
-            f"({CELLTYPE_REFERENCE.stat().st_size / 1_000_000:.2f} MB)"
-        )
-    else:
-        st.error("Cell-type reference file is missing.")
-
-    st.code(str(EXAMPLE_GENE_LIST))
-
-    if EXAMPLE_GENE_LIST.exists():
-        st.success("Example gene list found.")
-    else:
-        st.warning("Example gene list is missing.")
-
-    st.code(str(AVAILABLE_TISSUES_FILE))
-
-    if AVAILABLE_TISSUES_FILE.exists():
-        st.success("Tissue list file found.")
-    else:
-        st.error("Tissue list file is missing.")
 
 
 # -----------------------------

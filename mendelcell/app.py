@@ -711,7 +711,7 @@ if gene_file is None and not use_example_gene_list:
         PTPRC
         ```
 
-        To test the app on Hugging Face without uploading your own file, select:
+        To run an example file, select:
 
         ```text
         Use example gene list

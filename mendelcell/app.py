@@ -719,29 +719,7 @@ if gene_file is None and not use_example_gene_list:
         """
     )
 
-    st.header("Available tissues")
-
-    st.write(
-        "Choose one of these tissue names in the sidebar. "
-        "You can also choose **Immune cells** to analyze immune-related cell types."
-    )
-
-    try:
-        available_tissues = load_available_tissues()
-
-        tissue_df = pd.DataFrame(
-            {
-                "Tissue name": available_tissues
-            }
-        )
-
-        with st.expander("Show available tissue names", expanded=True):
-            show_dataframe_with_1_index(tissue_df, height=300, width=600)
-
-    except Exception as e:
-        st.warning(f"Could not load available tissue names: {e}")
-
-    st.stop()
+    
 
 
 # -----------------------------

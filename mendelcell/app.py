@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from mendelcell import list_tissues, run_mendelcell
+from mendelcell import run_mendelcell
 from mendelcell.report import create_pdf_report, safe_filename
 
 
@@ -24,6 +24,7 @@ EXAMPLES_DIR = ROOT_DIR / "examples"
 CLUSTER_REFERENCE = DATA_DIR / "mendelcell_clusters_reference.parquet"
 CELLTYPE_REFERENCE = DATA_DIR / "mendelcell_celltype_reference.parquet"
 EXAMPLE_GENE_LIST = EXAMPLES_DIR / "example_gene_list.tsv"
+AVAILABLE_TISSUES_FILE = DATA_DIR / "tissues.txt"
 
 
 # -----------------------------
@@ -301,13 +302,33 @@ def load_reference_data():
 
 @st.cache_data
 def load_available_tissues():
-    if not CLUSTER_REFERENCE.exists():
+    """
+    Load tissue names from a small text file instead of opening the
+    Parquet reference during application startup.
+    """
+    if not AVAILABLE_TISSUES_FILE.exists():
         raise FileNotFoundError(
-            f"Missing cluster reference file: {CLUSTER_REFERENCE}"
+            f"Missing tissue list file: {AVAILABLE_TISSUES_FILE}"
         )
 
-    clusters = pd.read_parquet(CLUSTER_REFERENCE)
-    return list_tissues(clusters)
+    with AVAILABLE_TISSUES_FILE.open("r", encoding="utf-8") as file:
+        tissues = [
+            line.strip()
+            for line in file
+            if line.strip()
+        ]
+
+    if not tissues:
+        raise ValueError(
+            f"Tissue list file is empty: {AVAILABLE_TISSUES_FILE}"
+        )
+
+    # Keep the MendelCell immune pseudo-tissue at the top of the menu.
+    if "Immune cells" in tissues:
+        tissues.remove("Immune cells")
+        tissues.insert(0, "Immune cells")
+
+    return tissues
 
 
 def read_gene_list(file_name, file_bytes):
@@ -620,6 +641,13 @@ with st.expander("Reference file status"):
     else:
         st.warning("Example gene list is missing.")
 
+    st.code(str(AVAILABLE_TISSUES_FILE))
+
+    if AVAILABLE_TISSUES_FILE.exists():
+        st.success("Tissue list file found.")
+    else:
+        st.error("Tissue list file is missing.")
+
 
 # -----------------------------
 # Stop if no gene file uploaded
@@ -666,8 +694,7 @@ if gene_file is None and not use_example_gene_list:
     )
 
     try:
-        # Temporary diagnostic: do not read the Parquet file on page load
-        available_tissues = ["Immune cells"]
+        available_tissues = load_available_tissues()
 
         tissue_df = pd.DataFrame(
             {

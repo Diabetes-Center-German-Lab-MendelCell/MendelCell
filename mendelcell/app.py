@@ -666,7 +666,8 @@ if gene_file is None and not use_example_gene_list:
     )
 
     try:
-        available_tissues = load_available_tissues()
+        # Temporary diagnostic: do not read the Parquet file on page load
+        available_tissues = ["Immune cells"]
 
         tissue_df = pd.DataFrame(
             {

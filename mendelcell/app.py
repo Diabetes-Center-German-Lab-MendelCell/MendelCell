@@ -607,43 +607,6 @@ gene_file = st.sidebar.file_uploader(
 
 st.sidebar.header("2. Choose settings")
 
-st.sidebar.markdown("### How to choose settings")
-
-st.sidebar.markdown(
-    """
-    **Choose tissue**  
-    Select the tissue whose cell types you want to prioritize.
-    **Immune cells** analyzes immune-related cell types as a group.
-
-    **Max cell filter**  
-    Uses a gene-specific threshold equal to one-third of the highest
-    selected-cell mean nCPM. When enabled, the two fixed threshold
-    fields below are disabled.
-
-    **Selected-cell expression threshold**  
-    Minimum expression required in cell types from the selected tissue.
-    Higher values are more stringent.
-
-    **Expression threshold for other cell types**  
-    Expression level used to count whether a gene is also expressed in
-    non-selected cell types.
-
-    **Maximum number of other cell types allowed above threshold**  
-    Lower values require greater tissue selectivity.
-
-    **Plot only selective genes**  
-    When checked, the graph includes only genes that pass the selectivity
-    criteria.
-
-    **Number of gene-cell type combinations to show**  
-    Controls how many ranked combinations appear in the graph and table.
-
-    Click **Run MendelCell analysis** after selecting the settings.
-    """
-)
-
-st.sidebar.divider()
-
 try:
     tissue_options = load_available_tissues()
 except Exception:
@@ -654,69 +617,220 @@ default_tissue_index = 0
 if "Immune cells" in tissue_options:
     default_tissue_index = tissue_options.index("Immune cells")
 
-selected_tissue = st.sidebar.selectbox(
-    "Choose tissue",
-    options=tissue_options,
-    index=default_tissue_index,
-)
 
-use_fraction_mean_ncpm_threshold = st.sidebar.checkbox(
-    "Max cell filter",
-    value=False,
-)
+# Choose tissue
+tissue_control_col, tissue_info_col = st.sidebar.columns([0.86, 0.14])
 
-if use_fraction_mean_ncpm_threshold:
-    st.sidebar.caption(
-        "For each gene, MendelCell calculates mean nCPM for each selected cell "
-        "type across all tissues where that gene-cell-type combination is expressed. "
-        "It then uses one-third of the highest selected cell-type mean nCPM as both "
-        "the selected-cell threshold and the other-cell threshold."
+with tissue_control_col:
+    selected_tissue = st.selectbox(
+        "Choose tissue",
+        options=tissue_options,
+        index=default_tissue_index,
     )
 
-threshold = st.sidebar.number_input(
-    "Selected-cell expression threshold",
-    min_value=0.0,
-    value=1.0,
-    step=0.5,
-    disabled=use_fraction_mean_ncpm_threshold,
-)
+with tissue_info_col:
+    st.write("")
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Choose tissue**
 
-non_selected_threshold = st.sidebar.number_input(
-    "Expression threshold for other cell types",
-    min_value=0.0,
-    value=float(threshold),
-    step=0.5,
-    disabled=use_fraction_mean_ncpm_threshold,
-)
+            Select the tissue whose cell types you want to prioritize.
 
-if use_fraction_mean_ncpm_threshold:
-    st.sidebar.caption(
-        "The two fixed threshold inputs above are disabled because gene-specific "
-        "one-third mean nCPM thresholds are being used."
+            **Immune cells** analyzes immune-related cell types as a group
+            rather than selecting one anatomical tissue.
+            """
+        )
+
+
+# Max cell filter
+max_filter_control_col, max_filter_info_col = st.sidebar.columns([0.86, 0.14])
+
+with max_filter_control_col:
+    use_fraction_mean_ncpm_threshold = st.checkbox(
+        "Max cell filter",
+        value=False,
     )
 
-max_non_selected_cell_types = st.sidebar.number_input(
-    "Maximum number of other cell types allowed above threshold",
-    min_value=0,
-    max_value=50,
-    value=10,
-    step=1,
+with max_filter_info_col:
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Max cell filter**
+
+            Uses a separate threshold for each gene instead of the two fixed
+            thresholds below.
+
+            MendelCell calculates the mean nCPM for each selected cell type and
+            uses one-third of the highest selected-cell mean nCPM as the
+            gene-specific threshold.
+
+            The same threshold is applied to the other cell types.
+            """
+        )
+
+
+# Selected-cell expression threshold
+selected_threshold_control_col, selected_threshold_info_col = st.sidebar.columns(
+    [0.86, 0.14]
 )
 
-use_selective_genes_for_plot = st.sidebar.checkbox(
-    "Plot only selective genes",
-    value=True,
+with selected_threshold_control_col:
+    threshold = st.number_input(
+        "Selected-cell expression threshold",
+        min_value=0.0,
+        value=1.0,
+        step=0.5,
+        disabled=use_fraction_mean_ncpm_threshold,
+    )
+
+with selected_threshold_info_col:
+    st.write("")
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Selected-cell expression threshold**
+
+            The minimum expression required in cell types associated with the
+            selected tissue.
+
+            Increasing this value makes the selected-cell filter more stringent.
+
+            This setting is disabled when **Max cell filter** is selected.
+            """
+        )
+
+
+# Other-cell expression threshold
+other_threshold_control_col, other_threshold_info_col = st.sidebar.columns(
+    [0.86, 0.14]
 )
 
-top_n = st.sidebar.number_input(
-    "Number of gene-cell type combinations to show",
-    min_value=1,
-    max_value=100,
-    value=50,
-    step=1,
+with other_threshold_control_col:
+    non_selected_threshold = st.number_input(
+        "Expression threshold for other cell types",
+        min_value=0.0,
+        value=float(threshold),
+        step=0.5,
+        disabled=use_fraction_mean_ncpm_threshold,
+    )
+
+with other_threshold_info_col:
+    st.write("")
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Expression threshold for other cell types**
+
+            The expression level used to determine whether a gene is also
+            expressed in non-selected cell types.
+
+            A non-selected cell type is counted when its expression meets or
+            exceeds this threshold.
+
+            This setting is disabled when **Max cell filter** is selected.
+            """
+        )
+
+
+# Maximum allowed other cell types
+maximum_other_control_col, maximum_other_info_col = st.sidebar.columns(
+    [0.86, 0.14]
 )
 
-run_button = st.sidebar.button("Run MendelCell analysis")
+with maximum_other_control_col:
+    max_non_selected_cell_types = st.number_input(
+        "Maximum number of other cell types allowed above threshold",
+        min_value=0,
+        max_value=50,
+        value=10,
+        step=1,
+    )
+
+with maximum_other_info_col:
+    st.write("")
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Maximum number of other cell types allowed above threshold**
+
+            Controls how selective a gene must be.
+
+            A lower number is more stringent. For example, a value of **10**
+            allows a gene to exceed the other-cell threshold in no more than
+            10 non-selected cell types.
+            """
+        )
+
+
+# Plot only selective genes
+plot_control_col, plot_info_col = st.sidebar.columns([0.86, 0.14])
+
+with plot_control_col:
+    use_selective_genes_for_plot = st.checkbox(
+        "Plot only selective genes",
+        value=True,
+    )
+
+with plot_info_col:
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Plot only selective genes**
+
+            When selected, the graph includes only genes that pass the
+            selectivity criteria.
+
+            Clear this option to graph all candidate genes with available
+            nCPM values.
+            """
+        )
+
+
+# Number of combinations to show
+top_n_control_col, top_n_info_col = st.sidebar.columns([0.86, 0.14])
+
+with top_n_control_col:
+    top_n = st.number_input(
+        "Number of gene-cell type combinations to show",
+        min_value=1,
+        max_value=100,
+        value=50,
+        step=1,
+    )
+
+with top_n_info_col:
+    st.write("")
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Number of gene-cell type combinations to show**
+
+            Sets the maximum number of ranked gene-cell type combinations
+            displayed in the graph and the accompanying table.
+            """
+        )
+
+
+# Run analysis
+run_control_col, run_info_col = st.sidebar.columns([0.86, 0.14])
+
+with run_control_col:
+    run_button = st.button(
+        "Run MendelCell analysis",
+        use_container_width=True,
+    )
+
+with run_info_col:
+    with st.popover("ⓘ", use_container_width=True):
+        st.markdown(
+            """
+            **Run MendelCell analysis**
+
+            Starts the analysis using the uploaded gene list, selected tissue,
+            and current filtering and plotting settings.
+            """
+        )
 
 
 # -----------------------------

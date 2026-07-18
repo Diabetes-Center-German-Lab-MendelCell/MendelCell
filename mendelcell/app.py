@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 import base64
 import io
 import tempfile
@@ -81,6 +82,80 @@ st.warning(
     "MendelCell is intended for research and exploratory analysis only. "
     "It is not a diagnostic tool and should not be used to make clinical decisions."
 )
+
+
+# -----------------------------
+# Reference-file status in container log
+# -----------------------------
+
+@st.cache_resource(show_spinner=False)
+def log_reference_file_status():
+    """
+    Print one reference-file status entry per Streamlit process.
+
+    Streamlit reruns app.py during user interaction, so cache_resource prevents
+    duplicate entries during ordinary page reruns.
+    """
+    files_to_check = [
+        ("Cluster reference", CLUSTER_REFERENCE),
+        ("Cell-type reference", CELLTYPE_REFERENCE),
+        ("Example gene list", EXAMPLE_GENE_LIST),
+        ("Tissue list", AVAILABLE_TISSUES_FILE),
+    ]
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    lines = [
+        "=" * 72,
+        "MendelCell reference-file status",
+        f"Timestamp (UTC): {timestamp}",
+        f"Application root: {ROOT_DIR}",
+        f"Data directory: {DATA_DIR}",
+        "",
+    ]
+
+    all_files_found = True
+
+    for label, path in files_to_check:
+        if path.exists():
+            size_bytes = path.stat().st_size
+            size_mb = size_bytes / 1_000_000
+
+            lines.extend(
+                [
+                    f"{label}: FOUND",
+                    f"Path: {path}",
+                    f"Size: {size_bytes:,} bytes ({size_mb:.2f} MB)",
+                    "",
+                ]
+            )
+        else:
+            all_files_found = False
+
+            lines.extend(
+                [
+                    f"{label}: MISSING",
+                    f"Path: {path}",
+                    "",
+                ]
+            )
+
+    lines.append(
+        "Overall status: READY"
+        if all_files_found
+        else "Overall status: ONE OR MORE FILES MISSING"
+    )
+    lines.append("=" * 72)
+
+    status_text = "\n".join(lines)
+
+    # This appears in the Hugging Face Container logs.
+    print(status_text, flush=True)
+
+    return all_files_found
+
+
+log_reference_file_status()
 
 
 # -----------------------------
@@ -532,6 +607,43 @@ gene_file = st.sidebar.file_uploader(
 
 st.sidebar.header("2. Choose settings")
 
+st.sidebar.markdown("### How to choose settings")
+
+st.sidebar.markdown(
+    """
+    **Choose tissue**  
+    Select the tissue whose cell types you want to prioritize.
+    **Immune cells** analyzes immune-related cell types as a group.
+
+    **Max cell filter**  
+    Uses a gene-specific threshold equal to one-third of the highest
+    selected-cell mean nCPM. When enabled, the two fixed threshold
+    fields below are disabled.
+
+    **Selected-cell expression threshold**  
+    Minimum expression required in cell types from the selected tissue.
+    Higher values are more stringent.
+
+    **Expression threshold for other cell types**  
+    Expression level used to count whether a gene is also expressed in
+    non-selected cell types.
+
+    **Maximum number of other cell types allowed above threshold**  
+    Lower values require greater tissue selectivity.
+
+    **Plot only selective genes**  
+    When checked, the graph includes only genes that pass the selectivity
+    criteria.
+
+    **Number of gene-cell type combinations to show**  
+    Controls how many ranked combinations appear in the graph and table.
+
+    Click **Run MendelCell analysis** after selecting the settings.
+    """
+)
+
+st.sidebar.divider()
+
 try:
     tissue_options = load_available_tissues()
 except Exception:
@@ -608,48 +720,6 @@ run_button = st.sidebar.button("Run MendelCell analysis")
 
 
 # -----------------------------
-# Reference file status
-# -----------------------------
-
-with st.expander("Reference file status"):
-    st.write("Expected reference files:")
-
-    st.code(str(CLUSTER_REFERENCE))
-
-    if CLUSTER_REFERENCE.exists():
-        st.success(
-            f"Cluster reference found "
-            f"({CLUSTER_REFERENCE.stat().st_size / 1_000_000:.2f} MB)"
-        )
-    else:
-        st.error("Cluster reference file is missing.")
-
-    st.code(str(CELLTYPE_REFERENCE))
-
-    if CELLTYPE_REFERENCE.exists():
-        st.success(
-            f"Cell-type reference found "
-            f"({CELLTYPE_REFERENCE.stat().st_size / 1_000_000:.2f} MB)"
-        )
-    else:
-        st.error("Cell-type reference file is missing.")
-
-    st.code(str(EXAMPLE_GENE_LIST))
-
-    if EXAMPLE_GENE_LIST.exists():
-        st.success("Example gene list found.")
-    else:
-        st.warning("Example gene list is missing.")
-
-    st.code(str(AVAILABLE_TISSUES_FILE))
-
-    if AVAILABLE_TISSUES_FILE.exists():
-        st.success("Tissue list file found.")
-    else:
-        st.error("Tissue list file is missing.")
-
-
-# -----------------------------
 # Stop if no gene file uploaded
 # -----------------------------
 
@@ -678,35 +748,13 @@ if gene_file is None and not use_example_gene_list:
         PTPRC
         ```
 
-        To test the app on Hugging Face without uploading your own file, select:
+        To run an example file, select:
 
         ```text
         Use example gene list
         ```
         """
     )
-
-    st.header("Available tissues")
-
-    st.write(
-        "Choose one of these tissue names in the sidebar. "
-        "You can also choose **Immune cells** to analyze immune-related cell types."
-    )
-
-    try:
-        available_tissues = load_available_tissues()
-
-        tissue_df = pd.DataFrame(
-            {
-                "Tissue name": available_tissues
-            }
-        )
-
-        with st.expander("Show available tissue names", expanded=True):
-            show_dataframe_with_1_index(tissue_df, height=300, width=600)
-
-    except Exception as e:
-        st.warning(f"Could not load available tissue names: {e}")
 
     st.stop()
 

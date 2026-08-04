@@ -83,6 +83,27 @@ st.warning(
     "It is not a diagnostic tool and should not be used to make clinical decisions."
 )
 
+with st.expander("About MendelCell and credits"):
+    st.markdown(
+        """
+        **MendelCell** was developed by **Landon Chamberlain** as a student
+        at the University of California San Francisco in the laboratory of 
+        Dr. Michael German.
+
+        Landon designed and implemented the analysis workflow, Streamlit web
+        interface, example datasets, selective-gene filtering, gene-specific
+        thresholding logic, visualizations, and downloadable TSV/PDF outputs.
+
+        The project was developed with mentorship and scientific guidance from
+        research mentors at the **UCSF Diabetes Center**, including guidance on
+        candidate-gene analysis, single-cell expression interpretation, and
+        responsible research use.
+
+        MendelCell uses public reference expression data and demonstration gene
+        lists. The public app does not expose confidential patient data.
+        """
+    )
+
 
 # -----------------------------
 # Reference-file status in container log
